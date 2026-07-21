@@ -9,7 +9,9 @@ test("the production source contains the Chinese learning application", async ()
     readFile(new URL("../app/components/LearningApp.tsx", import.meta.url), "utf8"),
     readFile(new URL("../dist/server/index.js", import.meta.url), "utf8"),
   ]);
-  assert.match(layout, /title: "Apprendre le chinois"/);
+  assert.match(layout, /applicationName: "Hanzi Horizon"/);
+  assert.match(layout, /siteName: "Hanzi Horizon"/);
+  assert.match(app, /Hanzi<br \/>Horizon/);
   assert.match(page, /<LearningApp/); assert.match(app, /Chargement de ta progression/);
   assert.ok(bundle.length > 1000);
   assert.doesNotMatch(`${layout}${page}${app}`, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

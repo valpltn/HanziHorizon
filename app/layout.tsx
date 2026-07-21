@@ -13,10 +13,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Apprendre le chinois",
-  description: "Réviser le vocabulaire chinois avec des leçons, quiz et statistiques.",
-  openGraph: { title: "Apprendre le chinois", description: "Vocabulaire, quiz et révisions intelligentes.", images: ["/og.png"] },
-  twitter: { card: "summary_large_image", title: "Apprendre le chinois", images: ["/og.png"] },
+  metadataBase: new URL("https://hanzi-horizon-learn.vaplat31.chatgpt.site"),
+  applicationName: "Hanzi Horizon",
+  title: { default: "Hanzi Horizon", template: "%s · Hanzi Horizon" },
+  description: "Apprendre le chinois avec 11 092 mots HSK, des quiz et des révisions intelligentes.",
+  manifest: "/manifest.webmanifest",
+  openGraph: {
+    type: "website",
+    siteName: "Hanzi Horizon",
+    title: "Hanzi Horizon",
+    description: "Un mot, une révision, puis un défi.",
+    images: [{ url: "/og.png", width: 1730, height: 909, alt: "Hanzi Horizon" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Hanzi Horizon",
+    description: "Un mot, une révision, puis un défi.",
+    images: ["/og.png"],
+  },
+  appleWebApp: { capable: true, title: "Hanzi Horizon", statusBarStyle: "default" },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

@@ -286,7 +286,7 @@ export function LearningApp() {
 
   return <main className="learning-app">
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
-      <div className="mark"><span>学</span><b>Apprendre<br />le chinois</b><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu"><X /></button></div>
+      <div className="mark"><span>学</span><b>Hanzi<br />Horizon</b><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu"><X /></button></div>
       <nav aria-label="Navigation principale">{nav.map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon size={19} /><span>{label}</span></button>)}</nav>
       <div className="sidebar-art" />
       <div className="streak"><Flame /><div><b>{stats.streakDays} jour{stats.streakDays > 1 ? "s" : ""}</b><small>de régularité</small></div></div>
