@@ -23,6 +23,7 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.10.2",
     "@cloudflare/vite-plugin": "1.37.1",
     "@playwright/test": "1.61.1",
     "@tailwindcss/postcss": "4.2.1",

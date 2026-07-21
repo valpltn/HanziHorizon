@@ -60,7 +60,10 @@
 ### Interface, accessibilité et robustesse
 
 - Navigation complète au clavier, focus visible, libellés accessibles et zones tactiles suffisantes.
-- Affichage 1440×1000, 1024×768 et 390×844 sans chevauchement ni débordement.
+- Affichage 1440×1000, 1024×768, iPhone 15 Pro (393×852, DPR 3), iPhone compact (320 px) et iPhone 15 Pro paysage sans chevauchement ni débordement.
+- Respect des zones sûres iOS, barre d’onglets inférieure fixe, panneau « Plus » refermable et contenu toujours accessible derrière la barre.
+- Audit automatisé axe sur les écrans clés avec les règles WCAG 2.2 A, AA et AAA ; aucun impact sérieux ou critique accepté.
+- Installation PWA : manifeste, icônes 180/192/512, mode autonome et service worker vérifiés sur un build de production.
 - Carte centrale proportionnée comme la référence, rail droit indépendant et images non déformées.
 - Chargement, erreur réseau, hors-ligne léger, absence de voix et données vides.
 - Audit de tous les boutons, liens, champs, curseurs, cases à cocher et zones de dessin : aucune commande active ne doit être inerte.
@@ -80,6 +83,8 @@
 | Résilience | Une panne réseau n’efface pas le travail local ; une synchronisation ultérieure est proposée ou automatique. |
 | Visuel | Les trois viewports cibles respectent la maquette : carte centrale non étirée, image cadrée, texte lisible et rail non déformé. |
 | Accessibilité | Parcours principal réalisable au clavier, focus perceptible, canvas et boutons nommés, contraste utile. |
+| Mobile iOS | Les cinq destinations principales restent disponibles à un pouce ; les autres sont regroupées dans « Plus » et les modales piègent puis restaurent le focus. |
+| PWA | Le manifeste et les icônes répondent, l’application s’ouvre en mode autonome et le service worker prend le contrôle après rechargement. |
 | Livraison | Build, tests unitaires, tests d’intégration, tests E2E, audit RLS et vérification visuelle réussissent avant publication privée. |
 
 ## 3. Stratégie et jeux de données
@@ -87,7 +92,8 @@
 - Tests unitaires : normalisation du pinyin, planification SRS, agrégation statistique et fusion découverte/cloud.
 - Tests d’intégration : opérations Supabase sous RLS, sauvegarde/chargement, reprise et dédoublonnage.
 - Tests E2E : découverte, création/connexion, navigation complète, révision, quiz, examen, écriture, paramètres et statistiques.
-- Tests visuels : comparaison à la référence fournie aux trois dimensions cibles.
+- Tests visuels : comparaison à la référence fournie sur desktop, tablette, iPhone 15 Pro, petit iPhone et paysage.
+- Tests d’accès : la validation locale du formulaire d’authentification est testée sans envoyer de compte réel ; les parcours Supabase restent couverts séparément lorsque l’environnement de test est autorisé.
 - Données : compte vierge, compte actif, deuxième compte isolé, session hors-ligne et réponses aux quatre niveaux de difficulté.
 
 ## 4. Ordre d’exécution

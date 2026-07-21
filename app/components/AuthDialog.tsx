@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { KeyRound, LoaderCircle, Mail, UserPlus, X } from "lucide-react";
 import { getSupabaseBrowserClient } from "../lib/supabase-client";
 
@@ -13,12 +13,31 @@ export function AuthDialog({ open, initialMode = "signin", onClose }: { open: bo
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ type: "error" | "success"; text: string } | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { onClose(); return; }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const controls = [...dialogRef.current.querySelectorAll<HTMLElement>("button:not([disabled]),input:not([disabled]),[href],[tabindex]:not([tabindex='-1'])")].filter((item) => item.offsetParent !== null);
+      if (!controls.length) return;
+      const first = controls[0]; const last = controls.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKey);
+    queueMicrotask(() => closeRef.current?.focus());
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKey);
+      queueMicrotask(() => returnFocusRef.current?.focus());
+    };
   }, [open, onClose]);
   if (!open) return null;
 
@@ -52,20 +71,20 @@ export function AuthDialog({ open, initialMode = "signin", onClose }: { open: bo
 
   const title = mode === "signin" ? "Retrouver ma progression" : mode === "signup" ? "Créer mon compte" : mode === "forgot" ? "Mot de passe oublié" : "Nouveau mot de passe";
   return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
-      <button className="icon-button close-button" onClick={onClose} aria-label="Fermer"><X /></button>
+    <section ref={dialogRef} className="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-description">
+      <button ref={closeRef} className="icon-button close-button" onClick={onClose} aria-label="Fermer"><X /></button>
       <div className="auth-symbol">{mode === "signup" ? <UserPlus /> : <KeyRound />}</div>
       <h2 id="auth-title">{title}</h2>
-      <p>{mode === "signin" ? "Tes révisions et statistiques seront chargées depuis le cloud." : mode === "signup" ? "La progression découverte sera importée automatiquement après la première connexion." : mode === "forgot" ? "Indique l’adresse utilisée pour ton compte." : "Choisis un mot de passe solide pour terminer la récupération."}</p>
+      <p id="auth-description">{mode === "signin" ? "Tes révisions et statistiques seront chargées depuis le cloud." : mode === "signup" ? "La progression découverte sera importée automatiquement après la première connexion." : mode === "forgot" ? "Indique l’adresse utilisée pour ton compte." : "Choisis un mot de passe solide pour terminer la récupération."}</p>
       <form onSubmit={submit}>
-        {mode !== "recovery" && <label><span>Adresse e-mail</span><div className="input-with-icon"><Mail /><input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></div></label>}
-        {mode !== "forgot" && <label><span>{mode === "signin" ? "Mot de passe" : "Nouveau mot de passe"}</span><input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>}
-        {(mode === "signup" || mode === "recovery") && <label><span>Confirmer le mot de passe</span><input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>}
-        {message && <p className={`form-message ${message.type}`} role="status">{message.text}</p>}
+        {mode !== "recovery" && <label><span>Adresse e-mail</span><div className="input-with-icon"><Mail aria-hidden="true" /><input type="email" inputMode="email" autoCapitalize="none" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={message?.type === "error" || undefined} aria-describedby={message ? "auth-message" : undefined} /></div></label>}
+        {mode !== "forgot" && <label><span>{mode === "signin" ? "Mot de passe" : "Nouveau mot de passe"}</span><input type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} required value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={message?.type === "error" || undefined} aria-describedby={message ? "auth-message" : undefined} /></label>}
+        {(mode === "signup" || mode === "recovery") && <label><span>Confirmer le mot de passe</span><input type="password" autoComplete="new-password" required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={message?.type === "error" || undefined} aria-describedby={message ? "auth-message" : undefined} /></label>}
+        {message && <p id="auth-message" className={`form-message ${message.type}`} role={message.type === "error" ? "alert" : "status"}>{message.text}</p>}
         <button type="submit" className="coral full" disabled={busy}>{busy ? <><LoaderCircle className="spin" /> Patiente…</> : title}</button>
       </form>
-      {mode === "signin" && <div className="auth-links"><button onClick={() => setMode("forgot")}>Mot de passe oublié ?</button><button onClick={() => setMode("signup")}>Créer un compte</button></div>}
-      {(mode === "signup" || mode === "forgot") && <button className="text-button" onClick={() => setMode("signin")}>← Retour à la connexion</button>}
+      {mode === "signin" && <div className="auth-links"><button type="button" onClick={() => { setMode("forgot"); setMessage(null); }}>Mot de passe oublié ?</button><button type="button" onClick={() => { setMode("signup"); setMessage(null); }}>Créer un compte</button></div>}
+      {(mode === "signup" || mode === "forgot") && <button type="button" className="text-button" onClick={() => { setMode("signin"); setMessage(null); }}>← Retour à la connexion</button>}
     </section>
   </div>;
 }

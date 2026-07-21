@@ -9,10 +9,10 @@ import type { User } from "@supabase/supabase-js";
 import {
   BarChart3, BookOpen, BrainCircuit, CalendarDays, Check, ChevronLeft, ChevronRight,
   Clock3, Cloud, CloudOff, Flame, GraduationCap, Heart, Library, LoaderCircle,
-  LockKeyhole, LogIn, LogOut, Menu, PenLine, Play, RotateCcw, Search, Settings,
-  Leaf, Sparkles, Sprout, UserRound, Volume2, X,
+  LockKeyhole, LogIn, LogOut, MoreHorizontal, PenLine, Play, RotateCcw, Search, Settings,
+  SlidersHorizontal, Leaf, Sparkles, Sprout, UserRound, Volume2, X,
 } from "lucide-react";
-import { lessons, source, vocabulary } from "../data/catalog";
+import { lessons, source, vocabularyPlaceholder } from "../data/lesson-catalog";
 import {
   answerMatches, calculateStats, clearGuestSnapshot, emptySettings,
   loadGuestSnapshot, mergeGuestProgress, saveGuestSnapshot, scheduleReview,
@@ -56,26 +56,38 @@ const quizTypes: { id: QuizType; title: string; text: string }[] = [
   { id: "matching", title: "Association", text: "Relier mot et sens" },
   { id: "character", title: "Reconnaissance", text: "Identifier un caractère" },
 ];
-const totalByLevel = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 1, vocabulary.filter((word) => word.level === i + 1).length]));
 const newId = () => crypto.randomUUID();
 const guidedKinds = ["word-zh-fr", "word-fr-zh", "sentence-zh-fr", "sentence-fr-zh", "cloze"] as const;
 type GuidedKind = typeof guidedKinds[number];
 const normalizeGuidedAnswer = (value: string) => value.toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s.,!?;:'’\-，。！？；：]/g, "");
 const initialProgress = (wordId: string): ReviewState => ({ wordId, favorite: false, mastery: 0, repetitions: 0, intervalDays: 0, dueAt: null, lastRating: null, lastSeenAt: null });
-const choiceValues = (word: VocabularyWord, field: "hanzi" | "french") => [word, ...vocabulary.filter((item) => item.id !== word.id).slice(0, 3)].map((item) => item[field]).sort((a, b) => a.localeCompare(b, "zh"));
+const choiceValues = (pool: VocabularyWord[], word: VocabularyWord, field: "hanzi" | "french") => [word, ...pool.filter((item) => item.id !== word.id).slice(0, 3)].map((item) => item[field]).sort((a, b) => a.localeCompare(b, "zh"));
 const toProgressRow = (userId: string, state: ReviewState) => ({ user_id: userId, word_id: state.wordId, favorite: state.favorite, mastery: state.mastery, repetitions: state.repetitions, interval_days: state.intervalDays, due_at: state.dueAt, last_rating: state.lastRating, last_seen_at: state.lastSeenAt, updated_at: new Date().toISOString() });
 const toEventRow = (userId: string, event: ReviewEvent) => ({ id: event.id, user_id: userId, word_id: event.wordId, rating: event.rating, correct: event.correct, quiz_type: event.quizType, duration_ms: event.durationMs, created_at: event.createdAt });
 const toQuizRow = (userId: string, result: QuizResult) => ({ id: result.id, user_id: userId, mode: result.mode, quiz_type: result.quizType, level: result.level, score: result.score, total: result.total, duration_seconds: result.durationSeconds, completed_at: result.completedAt });
 
+const focusableSelector = "button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
+function trapFocus(event: React.KeyboardEvent<HTMLElement>) {
+  if (event.key !== "Tab") return;
+  const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>(focusableSelector)].filter((item) => item.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1)!;
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+}
+
 export function LearningApp() {
   const [section, setSection] = useState<Section>("today");
   const [snapshot, setSnapshot] = useState<LearningSnapshot>(() => loadGuestSnapshot());
+  const [vocabulary, setVocabulary] = useState<VocabularyWord[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sync, setSync] = useState<SyncState>("local");
   const [notice, setNotice] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup" | "forgot" | "recovery">("signin");
@@ -108,18 +120,26 @@ export function LearningApp() {
   const [examTime, setExamTime] = useState(900);
   const [examAnswer, setExamAnswer] = useState<string | null>(null);
   const [examLevel, setExamLevel] = useState(3);
+  const [examConfirmOpen, setExamConfirmOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const actionStarted = useRef(Date.now());
   const lastQuizSubmission = useRef("");
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  const moreCloseRef = useRef<HTMLButtonElement>(null);
+  const profileTriggerRef = useRef<HTMLButtonElement>(null);
+  const profileCloseRef = useRef<HTMLButtonElement>(null);
+  const examCancelRef = useRef<HTMLButtonElement>(null);
 
-  const word = vocabulary[wordIndex % vocabulary.length];
-  const stats = useMemo(() => calculateStats(snapshot.progress, snapshot.reviewEvents, snapshot.quizResults, totalByLevel), [snapshot]);
+  const word = vocabulary[wordIndex % Math.max(1, vocabulary.length)] ?? vocabularyPlaceholder;
+  const totalByLevel = useMemo(() => Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 1, vocabulary.filter((item) => item.level === i + 1).length])), [vocabulary]);
+  const stats = useMemo(() => calculateStats(snapshot.progress, snapshot.reviewEvents, snapshot.quizResults, totalByLevel), [snapshot, totalByLevel]);
   const totalXp = snapshot.reviewEvents.filter((event) => event.correct).length * 5 + stats.masteredWords * 10;
   const lanternLevel = Math.floor(totalXp / 250) + 1;
   const lanternProgress = totalXp % 250;
-  const reviewPool = useMemo(() => lessonPracticeIds ? vocabulary.filter((item) => lessonPracticeIds.includes(item.id)) : vocabulary, [lessonPracticeIds]);
+  const reviewPool = useMemo(() => lessonPracticeIds ? vocabulary.filter((item) => lessonPracticeIds.includes(item.id)) : vocabulary, [lessonPracticeIds, vocabulary]);
   const dueWords = useMemo(() => reviewPool.filter((item) => !snapshot.progress[item.id]?.dueAt || new Date(snapshot.progress[item.id].dueAt!) <= new Date()), [reviewPool, snapshot.progress]);
   const reviewWord = lessonPracticeIds ? (reviewPool[lessonPracticeIndex] ?? word) : (dueWords[wordIndex % Math.max(1, dueWords.length)] ?? word);
-  const themes = useMemo(() => ["Tous", ...new Set(vocabulary.map((item) => item.theme))], []);
+  const themes = useMemo(() => ["Tous", ...new Set(vocabulary.map((item) => item.theme))], [vocabulary]);
   const today = new Date().toISOString().slice(0, 10);
   const learnedToday = new Set(snapshot.reviewEvents.filter((event) => event.correct && event.createdAt.startsWith(today)).map((event) => event.wordId)).size;
   const filtered = useMemo(() => vocabulary.filter((item) => {
@@ -129,7 +149,7 @@ export function LearningApp() {
       && (!filterLevel || item.level === filterLevel)
       && (filterTheme === "Tous" || item.theme === filterTheme)
       && (filterStatus === "tous" || (filterStatus === "favoris" && progress?.favorite) || (filterStatus === "appris" && (progress?.mastery ?? 0) > 0) || (filterStatus === "a-revoir" && progress?.dueAt && new Date(progress.dueAt) <= new Date()));
-  }), [search, filterLevel, filterTheme, filterStatus, snapshot.progress]);
+  }), [search, filterLevel, filterTheme, filterStatus, snapshot.progress, vocabulary]);
   const libraryResults = useMemo(
     () => filtered.filter((item) => section !== "favorites" || snapshot.progress[item.id]?.favorite),
     [filtered, section, snapshot.progress],
@@ -159,6 +179,22 @@ export function LearningApp() {
   // finishExam intentionally uses the current render's score and timer state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (examStarted && !examDone && examTime === 0) void finishExam(); }, [examTime, examStarted, examDone]);
+
+  useEffect(() => {
+    const target = examConfirmOpen ? examCancelRef.current : profileOpen ? profileCloseRef.current : moreOpen ? moreCloseRef.current : null;
+    if (!target) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (examConfirmOpen) setExamConfirmOpen(false);
+      else if (profileOpen) closeProfile();
+      else if (moreOpen) closeMore();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    queueMicrotask(() => target.focus());
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+  }, [examConfirmOpen, moreOpen, profileOpen]);
 
   async function loadCloud(activeUser: User) {
     const supabase = getSupabaseBrowserClient();
@@ -221,7 +257,21 @@ export function LearningApp() {
     window.speechSynthesis.cancel(); window.speechSynthesis.speak(utterance);
   }
 
-  function goTo(nextSection: Section) { setSection(nextSection); setMenuOpen(false); setNotice(""); setVisibleWordCount(libraryPageSize); }
+  function closeMore() { setMoreOpen(false); queueMicrotask(() => moreTriggerRef.current?.focus()); }
+  function closeProfile() { setProfileOpen(false); queueMicrotask(() => profileTriggerRef.current?.focus()); }
+  function prepareCatalog() {
+    if (vocabulary.length || catalogLoading) return;
+    setCatalogLoading(true); setLoading(true);
+    void import("../data/catalog").then((catalog) => setVocabulary(catalog.vocabulary)).catch(() => {
+      setNotice("Le vocabulaire complet n’a pas pu être chargé. Vérifie ta connexion puis réessaie.");
+      setSection("today");
+    }).finally(() => { setCatalogLoading(false); setLoading(false); });
+  }
+  function goTo(nextSection: Section) {
+    if (nextSection !== "today") prepareCatalog();
+    setSection(nextSection); setMoreOpen(false); setNotice(""); setVisibleWordCount(libraryPageSize); setFiltersOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
   function lessonProgressValue(item: Lesson) {
     if (!item.words.length) return 0;
     const targetMastery = item.kind === "discover" ? 1 : item.kind === "practice" ? 2 : 3;
@@ -382,6 +432,7 @@ export function LearningApp() {
     : unlockedGardenLevels.at(-1) ?? 1;
   const activeGardenTree = gardenTrees.find((tree) => tree.level === activeGardenLevel) ?? gardenTrees[0];
   const homeNextLesson = lessons.find((item) => item.level === activeGardenLevel && !isLessonComplete(item)) ?? lessons.find((item) => item.level === activeGardenLevel) ?? lessons[0];
+  const contentLoading = loading || catalogLoading;
 
   return <main className="learning-app">
     <div className="app-ink-atmosphere" aria-hidden="true">
@@ -389,27 +440,24 @@ export function LearningApp() {
       <img className="app-ink-pine" src="/garden/ink-samples-black/ink-pine-black.png" alt="" />
       <img className="app-ink-bamboo" src="/garden/ink-samples/ink-bamboo.png" alt="" />
     </div>
-    <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
-      <div className="mark"><span>学</span><b>Hanzi<br />Horizon</b><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu"><X /></button></div>
+    <aside className="sidebar">
+      <div className="mark"><span>学</span><b>Hanzi<br />Horizon</b></div>
       <nav aria-label="Navigation principale">{nav.map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon size={19} /><span>{label}</span></button>)}</nav>
       <div className="sidebar-art" />
       <div className="streak"><Flame /><div><b>{stats.streakDays} jour{stats.streakDays > 1 ? "s" : ""}</b><small>de régularité</small></div></div>
       <div className="lantern-mini"><Sparkles /><div><b>Lanterne {lanternLevel}</b><small>{lanternProgress} / 250 XP</small><i><span style={{ width: `${(lanternProgress / 250) * 100}%` }} /></i></div></div>
     </aside>
-    {menuOpen && <button className="menu-backdrop" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu" />}
-
     <section className="workspace">
       <header className="topbar">
-        <button className="menu-button" onClick={() => setMenuOpen(true)} aria-label="Ouvrir le menu"><Menu /></button>
         <div><h1>{titles[section]}</h1><p>{section === "today" ? "Un mot, une révision, puis un défi." : "Ton parcours personnel, à ton rythme."}</p></div>
-        <button className="profile" onClick={() => setProfileOpen(true)} aria-label="Ouvrir le profil">{user?.email?.[0].toUpperCase() ?? <UserRound />}</button>
+        <button ref={profileTriggerRef} className="profile" onClick={() => setProfileOpen(true)} aria-label="Ouvrir le profil" aria-expanded={profileOpen} aria-controls="profile-panel">{user?.email?.[0].toUpperCase() ?? <UserRound />}</button>
       </header>
 
       {notice && <div className="notice" role="status"><span>{notice}</span>{sync === "offline" && user && <button onClick={() => void loadCloud(user)}><RotateCcw /> Réessayer</button>}<button onClick={() => setNotice("")} aria-label="Fermer"><X /></button></div>}
-      {loading && <div className="loading" role="status"><LoaderCircle className="spin" /> Chargement de ta progression…</div>}
+      {contentLoading && <div className="loading" role="status"><LoaderCircle className="spin" /> {catalogLoading ? "Préparation du vocabulaire…" : "Chargement de ta progression…"}</div>}
 
-      {!loading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} tree={activeGardenTree} trees={gardenTrees} onSelectLevel={(level) => void saveSettings("activeLevel", level)} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
-      {false && !loading && section === "today" && <>
+      {!contentLoading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} tree={activeGardenTree} trees={gardenTrees} onSelectLevel={(level) => void saveSettings("activeLevel", level)} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
+      {false && !contentLoading && section === "today" && <>
         <div className="dashboard-grid">
           <article className="study-card">
             <img src="/bamboo-study.webp" alt="Bambous peints à l’encre" width={900} height={520} />
@@ -428,32 +476,47 @@ export function LearningApp() {
             <article className="recents"><h2>Récents</h2>{vocabulary.slice(0, 4).map((item, itemIndex) => <button className={`recent ${item.id === word.id ? "selected" : ""}`} key={item.id} onClick={() => setWordIndex(itemIndex)}><b>{item.hanzi}</b><span>{item.pinyin}<small>{item.french}</small></span></button>)}<button className="link" onClick={() => goTo("library")}>Voir tout <ChevronRight /></button></article>
           </aside>
         </div>
-        <section className="quick-quiz"><div><span className="quiz-icon">?</span><h2>Quiz rapide</h2><p>Quel caractère correspond à « {word.french} » ?</p></div><div className="answer-options">{choiceValues(word, "hanzi").map((choice) => <button key={choice} disabled={quickAnswer !== null} className={quickAnswer ? (choice === word.hanzi ? "correct" : quickAnswer === choice ? "wrong" : "") : ""} onClick={() => { setQuickAnswer(choice); void answerQuiz(choice, "reverse-choice"); }}>{choice}</button>)}</div>{quickAnswer && <small>{quickAnswer === word.hanzi ? "Exact ! Résultat enregistré." : `Pas encore : la bonne réponse est ${word.hanzi}.`}</small>}</section>
+        <section className="quick-quiz"><div><span className="quiz-icon">?</span><h2>Quiz rapide</h2><p>Quel caractère correspond à « {word.french} » ?</p></div><div className="answer-options">{choiceValues(vocabulary, word, "hanzi").map((choice) => <button key={choice} disabled={quickAnswer !== null} className={quickAnswer ? (choice === word.hanzi ? "correct" : quickAnswer === choice ? "wrong" : "") : ""} onClick={() => { setQuickAnswer(choice); void answerQuiz(choice, "reverse-choice"); }}>{choice}</button>)}</div>{quickAnswer && <small>{quickAnswer === word.hanzi ? "Exact ! Résultat enregistré." : `Pas encore : la bonne réponse est ${word.hanzi}.`}</small>}</section>
       </>}
 
-      {!loading && section === "review" && <section className="review-panel">
+      {!contentLoading && section === "review" && <section className="review-panel">
         <div className="review-summary"><div><span className="eyebrow">{lessonPracticeIds ? "LEÇON DE TRADUCTION" : "FILE DU JOUR"}</span><h2>{lessonPracticeIds ? `${lessonPracticeIndex + 1} / 10 · ${lesson?.theme ?? "Parcours thématique"}` : `${dueWords.length} mot${dueWords.length > 1 ? "s" : ""} à réviser`}</h2><p>{lessonPracticeIds ? "Comprends, traduis, reconstruis puis produis la phrase." : "Les intervalles s’adaptent à chacune de tes réponses."}</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> {lessonPracticeIds ? "Continuer" : "Commencer la session"}</button></div>
-        {reviewActive ? lessonPracticeIds ? <GuidedLessonExercise word={reviewPool[lessonPracticeIndex % reviewPool.length] ?? reviewWord} kind={guidedKinds[lessonPracticeIndex % guidedKinds.length]} step={lessonPracticeIndex} total={10} input={guidedInput} result={guidedResult} xp={guidedXp} combo={guidedCombo} onInput={setGuidedInput} onSpeak={speak} onAnswer={(value, kind, target) => void answerGuided(value, kind, target)} onNext={nextGuided} /> : <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
+        {reviewActive ? lessonPracticeIds ? <GuidedLessonExercise pool={vocabulary} word={reviewPool[lessonPracticeIndex % reviewPool.length] ?? reviewWord} kind={guidedKinds[lessonPracticeIndex % guidedKinds.length]} step={lessonPracticeIndex} total={10} input={guidedInput} result={guidedResult} xp={guidedXp} combo={guidedCombo} onInput={setGuidedInput} onSpeak={speak} onAnswer={(value, kind, target) => void answerGuided(value, kind, target)} onNext={nextGuided} /> : <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
       </section>}
 
       {!loading && section === "lessons" && <section className="lesson-path">{lesson ? <div className="lesson-detail"><button className="text-button" onClick={() => setLessonId(null)}>← Retour au parcours</button><span className="eyebrow">{levelLabel(lesson.level)} · {lesson.kind === "discover" ? "DÉCOUVERTE" : lesson.kind === "practice" ? "PRATIQUE" : "DÉFI"}</span><h2>{lesson.title}</h2><p>{lesson.goal}</p><div className="lesson-meta"><span><Clock3 /> {lesson.durationMinutes} min</span><span><Sparkles /> {lesson.xp} XP</span><span><Check /> {lessonProgressValue(lesson)} % acquis</span></div><div className="lesson-words">{lessonWords.map((item) => <article key={item.id}><b>{item.hanzi}</b><span>{item.pinyin}</span><p>{item.french}</p><button onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /></button></article>)}</div><button className="coral" onClick={() => startLesson(lesson)}><Play /> {lessonProgressValue(lesson) ? "Reprendre la leçon" : "Commencer la leçon"}</button></div> : <><div className="path-intro"><div><span className="eyebrow">PARCOURS HSK GUIDÉ</span><h2>Avance thème par thème</h2><p>Chaque unité répète le même vocabulaire en trois étapes : découverte, mise en situation et défi.</p></div><div className="level-progress"><b>{Math.round(lessons.filter((item) => item.level === lessonLevel).reduce((sum, item) => sum + lessonProgressValue(item), 0) / Math.max(1, lessons.filter((item) => item.level === lessonLevel).length))}%</b><span>du niveau</span></div></div><div className="level-tabs" role="tablist" aria-label="Choisir un niveau HSK">{levelOptions.map((value) => <button role="tab" aria-selected={lessonLevel === value} className={lessonLevel === value ? "active" : ""} key={value} onClick={() => { setLessonLevel(value); setLessonId(null); }}>{levelLabel(value)}</button>)}</div><div className="unit-list">{lessonUnits.map((unitLessons, unitIndex) => { const unit = unitLessons[0]; const unitLocked = unitIndex > 0 && !isLessonComplete(lessonUnits[unitIndex - 1].at(-1)!); const unitProgress = Math.round(unitLessons.reduce((sum, item) => sum + lessonProgressValue(item), 0) / unitLessons.length); return <article className={`lesson-unit ${unitLocked ? "locked" : ""}`} key={unit.unitId}><header><div><span>UNITÉ {unit.unitOrder}</span><h2>{unit.unitTitle}</h2><p>{unit.unitDescription}</p></div><div className="unit-progress"><b>{unitProgress}%</b><i><span style={{ width: `${unitProgress}%` }} /></i></div></header><div className="lesson-nodes">{unitLessons.map((item) => { const unlocked = isLessonUnlocked(item); const progress = lessonProgressValue(item); const complete = isLessonComplete(item); return <button key={item.id} disabled={!unlocked} className={`lesson-node ${item.kind} ${complete ? "complete" : ""}`} onClick={() => setLessonId(item.id)}><span className="node-icon">{!unlocked ? <LockKeyhole /> : complete ? <Check /> : item.kind === "checkpoint" ? <Sparkles /> : <GraduationCap />}</span><span><small>{item.kind === "discover" ? "1 · Découvrir" : item.kind === "practice" ? "2 · En situation" : "3 · Défi"}</small><b>{item.words.length} mots · {item.durationMinutes} min</b><i><span style={{ width: `${progress}%` }} /></i></span></button>; })}</div></article>; })}</div></>}</section>}
 
-      {!loading && (section === "library" || section === "favorites") && <section className="library-view"><div className="library-head"><div><h2>{section === "favorites" ? "Tes favoris" : "Tout le vocabulaire"}</h2><p>{source.title} · {source.version}</p><small>{libraryResults.length.toLocaleString("fr-FR")} résultat{libraryResults.length > 1 ? "s" : ""}</small></div><label className="search"><Search /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleWordCount(libraryPageSize); }} placeholder="Mot, pinyin ou français" /></label></div><div className="filters"><select value={filterLevel} onChange={(event) => { setFilterLevel(Number(event.target.value)); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par niveau"><option value={0}>Tous les niveaux</option>{levelOptions.map((value) => <option key={value} value={value}>{levelLabel(value)}</option>)}</select><select value={filterTheme} onChange={(event) => { setFilterTheme(event.target.value); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par thème">{themes.map((item) => <option key={item}>{item}</option>)}</select><select value={section === "favorites" ? "favoris" : filterStatus} onChange={(event) => { setFilterStatus(event.target.value); setVisibleWordCount(libraryPageSize); }} disabled={section === "favorites"} aria-label="Filtrer par statut"><option value="tous">Tous les statuts</option><option value="favoris">Favoris</option><option value="appris">Déjà vus</option><option value="a-revoir">À revoir</option></select></div><div className="word-table">{visibleLibraryWords.map((item) => <article key={item.id}><button className="favorite" onClick={() => void toggleFavorite(item)} aria-label={snapshot.progress[item.id]?.favorite ? "Retirer des favoris" : "Ajouter aux favoris"}>{snapshot.progress[item.id]?.favorite ? "★" : "☆"}</button><b>{item.hanzi}</b><span>{item.pinyin}</span><span>{item.french}</span><small>{levelLabel(item.level)} · {item.theme}</small><button className="listen" onClick={() => speak(item.hanzi)}><Volume2 /> Écouter</button></article>)}{!libraryResults.length && <div className="empty-state"><Search /><h3>Aucun mot trouvé</h3><p>Modifie les filtres ou ajoute des favoris depuis la bibliothèque.</p></div>}</div>{visibleWordCount < libraryResults.length && <button className="coral library-more" onClick={() => setVisibleWordCount((count) => count + libraryPageSize)}>Afficher 120 mots de plus</button>}<p className="source-credit">Définitions françaises : <a href={source.dictionaryUrl} target="_blank" rel="noreferrer">CFDICT</a> · Liste HSK : <a href={source.url} target="_blank" rel="noreferrer">ivankra/hsk30</a></p></section>}
+      {!contentLoading && (section === "library" || section === "favorites") && <section className="library-view">
+        <div className="library-head"><div><h2>{section === "favorites" ? "Tes favoris" : "Tout le vocabulaire"}</h2><p>{source.title} · {source.version}</p><small>{libraryResults.length.toLocaleString("fr-FR")} résultat{libraryResults.length > 1 ? "s" : ""}</small></div><div className="library-tools"><label className="search"><span className="sr-only">Rechercher dans le vocabulaire</span><Search aria-hidden="true" /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleWordCount(libraryPageSize); }} placeholder="Mot, pinyin ou français" /></label><button className="filter-toggle" onClick={() => setFiltersOpen((value) => !value)} aria-expanded={filtersOpen} aria-controls="library-filters"><SlidersHorizontal /> Filtres</button></div></div>
+        <div id="library-filters" className={`filters ${filtersOpen ? "open" : ""}`}><select value={filterLevel} onChange={(event) => { setFilterLevel(Number(event.target.value)); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par niveau"><option value={0}>Tous les niveaux</option>{levelOptions.map((value) => <option key={value} value={value}>{levelLabel(value)}</option>)}</select><select value={filterTheme} onChange={(event) => { setFilterTheme(event.target.value); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par thème">{themes.map((item) => <option key={item}>{item}</option>)}</select><select value={section === "favorites" ? "favoris" : filterStatus} onChange={(event) => { setFilterStatus(event.target.value); setVisibleWordCount(libraryPageSize); }} disabled={section === "favorites"} aria-label="Filtrer par statut"><option value="tous">Tous les statuts</option><option value="favoris">Favoris</option><option value="appris">Déjà vus</option><option value="a-revoir">À revoir</option></select></div>
+        <div className="word-table">{visibleLibraryWords.map((item) => <article key={item.id}><button className="favorite" onClick={() => void toggleFavorite(item)} aria-label={snapshot.progress[item.id]?.favorite ? `Retirer ${item.hanzi} des favoris` : `Ajouter ${item.hanzi} aux favoris`}>{snapshot.progress[item.id]?.favorite ? "★" : "☆"}</button><b>{item.hanzi}</b><span>{item.pinyin}</span><span>{item.french}</span><small>{levelLabel(item.level)} · {item.theme}</small><button className="listen" onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /> Écouter</button></article>)}{!libraryResults.length && <div className="empty-state"><Search /><h3>Aucun mot trouvé</h3><p>Modifie les filtres ou ajoute des favoris depuis la bibliothèque.</p></div>}</div>{visibleWordCount < libraryResults.length && <button className="coral library-more" onClick={() => setVisibleWordCount((count) => count + libraryPageSize)}>Afficher 120 mots de plus</button>}<p className="source-credit">Définitions françaises : <a href={source.dictionaryUrl} target="_blank" rel="noreferrer">CFDICT</a> · Liste HSK : <a href={source.url} target="_blank" rel="noreferrer">ivankra/hsk30</a></p>
+      </section>}
 
-      {!loading && section === "quiz" && <section className="quiz-lab"><h2>Choisis un exercice</h2><div className="quiz-cards">{quizTypes.map((item) => <button className={`quiz-choice ${quizType === item.id ? "active" : ""}`} key={item.id} onClick={() => { setQuizType(item.id); setQuizAnswer(null); setQuizInput(""); lastQuizSubmission.current = ""; actionStarted.current = Date.now(); }}><b>{item.title}</b><span>{item.text}</span><i>→</i></button>)}</div><QuizExercise type={quizType} word={word} input={quizInput} answer={quizAnswer} onInput={setQuizInput} onSpeak={() => speak(word.hanzi)} onAnswer={(value) => void answerQuiz(value)} onNext={nextWord} /><p className="scoreline">Session : {quizScore.correct} bonne{quizScore.correct > 1 ? "s" : ""} réponse{quizScore.correct > 1 ? "s" : ""} sur {quizScore.total}</p></section>}
+      {!loading && section === "quiz" && <section className="quiz-lab"><h2>Choisis un exercice</h2><div className="quiz-cards">{quizTypes.map((item) => <button className={`quiz-choice ${quizType === item.id ? "active" : ""}`} key={item.id} onClick={() => { setQuizType(item.id); setQuizAnswer(null); setQuizInput(""); lastQuizSubmission.current = ""; actionStarted.current = Date.now(); }}><b>{item.title}</b><span>{item.text}</span><i>→</i></button>)}</div><QuizExercise pool={vocabulary} type={quizType} word={word} input={quizInput} answer={quizAnswer} onInput={setQuizInput} onSpeak={() => speak(word.hanzi)} onAnswer={(value) => void answerQuiz(value)} onNext={nextWord} /><p className="scoreline">Session : {quizScore.correct} bonne{quizScore.correct > 1 ? "s" : ""} réponse{quizScore.correct > 1 ? "s" : ""} sur {quizScore.total}</p></section>}
 
-      {!loading && section === "exam" && <section className="exam"><span className="eyebrow">SIMULATION HSK</span><h2>20 questions · 15 minutes</h2><p>Les erreurs sont ajoutées aux statistiques et orientent tes prochaines révisions.</p>{!examStarted && !examDone && <><label>Niveau maximum <select value={examLevel} onChange={(event) => setExamLevel(Number(event.target.value))}>{[1, 2, 3].map((value) => <option key={value} value={value}>HSK {value}</option>)}</select></label><button className="coral" onClick={beginExam}><Clock3 /> Lancer l’examen</button></>}{examStarted && <ExamQuestion level={examLevel} index={examIndex} time={examTime} answer={examAnswer} onAnswer={(value) => void answerExam(value)} onNext={nextExamQuestion} onAbandon={() => { setExamStarted(false); setExamDone(false); setNotice("Examen abandonné : aucun résultat n’a été enregistré."); }} />}{examDone && <div className="exam-result"><Check /><h3>Examen terminé</h3><b>{examScore} / 20</b><p>Le résultat est enregistré dans tes statistiques.</p><button className="coral" onClick={beginExam}>Recommencer</button></div>}</section>}
+      {!loading && section === "exam" && <section className="exam"><span className="eyebrow">SIMULATION HSK</span><h2>20 questions · 15 minutes</h2><p>Les erreurs sont ajoutées aux statistiques et orientent tes prochaines révisions.</p>{!examStarted && !examDone && <><label>Niveau maximum <select value={examLevel} onChange={(event) => setExamLevel(Number(event.target.value))}>{[1, 2, 3].map((value) => <option key={value} value={value}>HSK {value}</option>)}</select></label><button className="coral" onClick={beginExam}><Clock3 /> Lancer l’examen</button></>}{examStarted && <ExamQuestion pool={vocabulary} level={examLevel} index={examIndex} time={examTime} answer={examAnswer} onAnswer={(value) => void answerExam(value)} onNext={nextExamQuestion} onAbandon={() => setExamConfirmOpen(true)} />}{examDone && <div className="exam-result"><Check /><h3>Examen terminé</h3><b>{examScore} / 20</b><p>Le résultat est enregistré dans tes statistiques.</p><button className="coral" onClick={beginExam}>Recommencer</button></div>}</section>}
 
-      {!loading && section === "writing" && <WritingBoard hanzi={word.hanzi} pinyin={word.pinyin} onSpeak={() => speak(word.hanzi)} onNext={nextWord} />}
+      {!contentLoading && section === "writing" && <WritingBoard key={word.id} hanzi={word.hanzi} pinyin={word.pinyin} onSpeak={() => speak(word.hanzi)} onNext={nextWord} />}
 
-      {!loading && section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{stats.masteredWords}</b><small>Maîtrise 3 ou plus</small></div><div className="stat"><span>Précision</span><b>{stats.precision}%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>{formatDuration(stats.studySeconds)}</b><small>Activité enregistrée</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars">{stats.weeklyActivity.map((value, itemIndex) => <div key={itemIndex}><i style={{ height: `${Math.max(4, value * 12)}%` }} /><small>{["L", "M", "M", "J", "V", "S", "D"][itemIndex]}</small><span>{value}</span></div>)}</div></article><article className="mistakes"><h2>À retravailler</h2>{stats.frequentErrors.length ? stats.frequentErrors.map((id) => { const item = vocabulary.find((candidate) => candidate.id === id); return item ? <p key={id}><b>{item.hanzi}</b> · {item.pinyin} · {item.french}</p> : null; }) : <p>Aucune erreur enregistrée pour le moment.</p>}<button className="coral" onClick={() => goTo("review")}>Réviser ces mots</button></article></section>}
+      {!loading && section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{stats.masteredWords}</b><small>Maîtrise 3 ou plus</small></div><div className="stat"><span>Précision</span><b>{stats.precision}%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>{formatDuration(stats.studySeconds)}</b><small>Activité enregistrée</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars" aria-hidden="true">{stats.weeklyActivity.map((value, itemIndex) => <div key={itemIndex}><i style={{ height: `${Math.max(4, value * 12)}%` }} /><small>{["L", "M", "M", "J", "V", "S", "D"][itemIndex]}</small><span>{value}</span></div>)}</div><ul className="sr-only">{stats.weeklyActivity.map((value, itemIndex) => <li key={itemIndex}>Jour {itemIndex + 1} : {value} activité{value > 1 ? "s" : ""}</li>)}</ul></article><article className="mistakes"><h2>À retravailler</h2>{stats.frequentErrors.length ? stats.frequentErrors.map((id) => { const item = vocabulary.find((candidate) => candidate.id === id); return item ? <p key={id}><b>{item.hanzi}</b> · {item.pinyin} · {item.french}</p> : null; }) : <p>Aucune erreur enregistrée pour le moment.</p>}<button className="coral" onClick={() => goTo("review")}>Réviser ces mots</button></article></section>}
 
-      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{snapshot.settings.dailyGoal} mots</output><input type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label>Niveau actif <select value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle"><span>Afficher les tons dans le pinyin</span><input type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label>{isAdmin && <label className="toggle"><span>Mode administrateur <small>Déverrouille tous les niveaux pour les tests.</small></span><input type="checkbox" checked={snapshot.settings.adminMode} onChange={(event) => void saveSettings("adminMode", event.target.checked)} /></label>}<article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
+      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label htmlFor="daily-goal">Objectif quotidien <output id="daily-goal-value">{snapshot.settings.dailyGoal} mots</output><input id="daily-goal" aria-describedby="daily-goal-value" type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label htmlFor="active-level">Niveau actif <select id="active-level" value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle" htmlFor="show-tones"><span>Afficher les tons dans le pinyin</span><input id="show-tones" type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label>{isAdmin && <label className="toggle" htmlFor="admin-mode"><span>Mode administrateur <small>Déverrouille tous les niveaux pour les tests.</small></span><input id="admin-mode" type="checkbox" checked={snapshot.settings.adminMode} onChange={(event) => void saveSettings("adminMode", event.target.checked)} /></label>}<article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
     </section>
 
-    {profileOpen && <><button className="panel-backdrop" onClick={() => setProfileOpen(false)} aria-label="Fermer le profil" /><aside className="profile-panel" aria-label="Profil"><button className="icon-button close-button" onClick={() => setProfileOpen(false)} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2>{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { setProfileOpen(false); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
+    <MobileNavigation section={section} onNavigate={goTo} moreOpen={moreOpen} onMore={() => setMoreOpen(true)} triggerRef={moreTriggerRef} />
+    {moreOpen && <><button className="panel-backdrop mobile-panel-backdrop" onClick={closeMore} aria-label="Fermer le menu Plus" /><section id="mobile-more-panel" className="mobile-more-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title" onKeyDown={trapFocus}><header><div><span>Navigation</span><h2 id="mobile-more-title">Plus</h2></div><button ref={moreCloseRef} className="icon-button" onClick={closeMore} aria-label="Fermer"><X /></button></header><nav aria-label="Navigation secondaire">{nav.filter(([id]) => mobileSecondarySections.includes(id)).map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon /><span>{label}</span><ChevronRight /></button>)}</nav></section></>}
+    {profileOpen && <><button className="panel-backdrop" onClick={closeProfile} aria-label="Fermer le profil" /><aside id="profile-panel" className="profile-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title" onKeyDown={trapFocus}><button ref={profileCloseRef} className="icon-button close-button" onClick={closeProfile} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2 id="profile-title">{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { closeProfile(); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
+    {examConfirmOpen && <div className="modal-backdrop"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="exam-confirm-title" aria-describedby="exam-confirm-copy" onKeyDown={trapFocus}><h2 id="exam-confirm-title">Abandonner l’examen ?</h2><p id="exam-confirm-copy">Ta progression sur ces questions ne sera pas enregistrée.</p><div><button ref={examCancelRef} className="outline" onClick={() => setExamConfirmOpen(false)}>Continuer l’examen</button><button className="danger-button" onClick={() => { setExamConfirmOpen(false); setExamStarted(false); setExamDone(false); setNotice("Examen abandonné : aucun résultat n’a été enregistré."); }}>Abandonner</button></div></section></div>}
     <AuthDialog key={`${authMode}-${authOpen}`} open={authOpen} initialMode={authMode} onClose={() => setAuthOpen(false)} />
   </main>;
+}
+
+function MobileNavigation({ section, onNavigate, moreOpen, onMore, triggerRef }: { section: Section; onNavigate: (section: Section) => void; moreOpen: boolean; onMore: () => void; triggerRef: React.RefObject<HTMLButtonElement | null> }) {
+  const labels: Partial<Record<Section, string>> = { library: "Mots" };
+  return <nav className="mobile-tabbar" aria-label="Navigation mobile">
+    {nav.filter(([id]) => mobilePrimarySections.includes(id)).map(([id, label, Icon]) => <button key={id} onClick={() => onNavigate(id)} className={section === id ? "active" : ""} aria-current={section === id ? "page" : undefined}><Icon /><span>{labels[id] ?? label}</span></button>)}
+    <button ref={triggerRef} onClick={onMore} className={mobileSecondarySections.includes(section) ? "active" : ""} aria-expanded={moreOpen} aria-controls="mobile-more-panel"><MoreHorizontal /><span>Plus</span></button>
+  </nav>;
 }
 
 const gardenSlots = [
@@ -462,6 +525,8 @@ const gardenSlots = [
   [52, 32, 24], [53, 30, 42], [50, 25, -44], [51, 19, -16],
   [52, 16, 12], [53, 18, 32], [54, 22, 54], [52, 9, 0],
 ] as const;
+const mobilePrimarySections: Section[] = ["today", "review", "lessons", "library"];
+const mobileSecondarySections: Section[] = ["favorites", "quiz", "exam", "writing", "stats", "settings"];
 
 function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, tree, trees, onSelectLevel, onContinue }: { totalXp: number; learnedToday: number; dailyGoal: number; streakDays: number; nextLesson: Lesson; tree: GardenTreeState; trees: GardenTreeState[]; onSelectLevel: (level: number) => void; onContinue: () => void }) {
   const treeProgress = Math.round((tree.completedUnits / 16) * 100);
@@ -479,7 +544,7 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
     <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{levelName} · {tree.completedUnits} / 16 unités en floraison</p></header>
     <div className="garden-level-picker" role="tablist" aria-label="Choisir l’arbre HSK">{trees.map((item) => <button role="tab" aria-selected={item.level === tree.level} className={item.level === tree.level ? "active" : ""} disabled={!item.unlocked} onClick={() => onSelectLevel(item.level)} key={item.level}>{item.unlocked ? `HSK ${item.level}` : <><LockKeyhole /> HSK {item.level}</>}</button>)}</div>
     <div className="garden-layout">
-      <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" aria-label={`${treeProgress}% du ${levelName} terminé`}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
+      <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" role="progressbar" aria-label={`Progression du ${levelName}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={treeProgress}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
       <div className="tree-scene hsk-tree-scene">
         <img className="tree-locked" src={`/tree/hsk/hsk-${tree.level}-locked.png`} alt={`Arbre ${levelName}, ${tree.completedUnits} unités terminées`} />
         {tree.branches.map((state, index) => {
@@ -496,7 +561,7 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
   </section>;
 }
 
-function GuidedLessonExercise({ word, kind, step, total, input, result, xp, combo, onInput, onSpeak, onAnswer, onNext }: { word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; onInput: (value: string) => void; onSpeak: (value: string) => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {
+function GuidedLessonExercise({ pool, word, kind, step, total, input, result, xp, combo, onInput, onSpeak, onAnswer, onNext }: { pool: VocabularyWord[]; word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; onInput: (value: string) => void; onSpeak: (value: string) => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {
   const prompts: Record<GuidedKind, string> = {
     "word-zh-fr": `Traduis « ${word.hanzi} » en français`,
     "word-fr-zh": `Traduis « ${word.french} » en chinois`,
@@ -505,7 +570,7 @@ function GuidedLessonExercise({ word, kind, step, total, input, result, xp, comb
     cloze: `Complète la phrase : ${word.example.includes(word.hanzi) ? word.example.replace(word.hanzi, "____") : `____ · ${word.pinyin}`}`,
   };
   const expected = kind === "word-zh-fr" ? word.french : kind === "word-fr-zh" || kind === "cloze" ? word.hanzi : kind === "sentence-zh-fr" ? word.exampleFr : word.example;
-  const choices = kind === "word-zh-fr" ? choiceValues(word, "french") : kind === "word-fr-zh" ? choiceValues(word, "hanzi") : [];
+  const choices = kind === "word-zh-fr" ? choiceValues(pool, word, "french") : kind === "word-fr-zh" ? choiceValues(pool, word, "hanzi") : [];
   const freeInput = choices.length === 0;
   return <article className="guided-lesson-card">
     <div className="guided-head"><div><span>EXERCICE {step + 1} / {total}</span><i><b style={{ width: `${((step + 1) / total) * 100}%` }} /></i></div><div className={`xp-lantern ${combo >= 3 ? "glowing" : ""}`}><Sparkles /><span><b>{xp} XP</b><small>{combo > 1 ? `Série ×${combo}` : "Lanterne"}</small></span></div></div>
@@ -515,18 +580,18 @@ function GuidedLessonExercise({ word, kind, step, total, input, result, xp, comb
   </article>;
 }
 
-function QuizExercise({ type, word, input, answer, onInput, onSpeak, onAnswer, onNext }: { type: QuizType; word: VocabularyWord; input: string; answer: string | null; onInput: (value: string) => void; onSpeak: () => void; onAnswer: (value: string) => void; onNext: () => void }) {
+function QuizExercise({ pool, type, word, input, answer, onInput, onSpeak, onAnswer, onNext }: { pool: VocabularyWord[]; type: QuizType; word: VocabularyWord; input: string; answer: string | null; onInput: (value: string) => void; onSpeak: () => void; onAnswer: (value: string) => void; onNext: () => void }) {
   const expected = type === "reverse-choice" || type === "dictation" || type === "character" ? word.hanzi : type === "pinyin" ? word.pinyin : word.french;
-  const options = type === "reverse-choice" || type === "dictation" || type === "character" ? choiceValues(word, "hanzi") : choiceValues(word, "french");
+  const options = type === "reverse-choice" || type === "dictation" || type === "character" ? choiceValues(pool, word, "hanzi") : choiceValues(pool, word, "french");
   const prompt = type === "reverse-choice" ? `Quel caractère signifie « ${word.french} » ?` : type === "pinyin" ? `Écris le pinyin de ${word.hanzi}` : type === "dictation" ? "Écoute puis choisis le caractère" : type === "cloze" ? word.example.replace(word.hanzi, "____") : type === "matching" ? `Associe ${word.hanzi} à son sens` : type === "character" ? `Quel caractère correspond à « ${word.french} » ?` : `Que signifie ${word.hanzi} ?`;
   const correct = answer ? answerMatches(answer, expected, type) : false;
   return <article className="quiz-exercise"><span className="eyebrow">{type.toUpperCase()}</span><h3>{prompt}</h3>{type === "dictation" && <button className="outline" onClick={onSpeak}><Volume2 /> Écouter</button>}{type === "pinyin" || type === "cloze" ? <div className="inline-answer"><input value={input} onChange={(event) => onInput(event.target.value)} disabled={answer !== null} placeholder="Ta réponse" /><button className="coral" disabled={!input.trim() || answer !== null} onClick={() => onAnswer(input)}>Vérifier</button></div> : <div className="answer-options">{options.map((option) => <button key={option} disabled={answer !== null} className={answer ? (option === expected ? "correct" : answer === option ? "wrong" : "") : ""} onClick={() => onAnswer(option)}>{option}</button>)}</div>}{answer && <div className={`result ${correct ? "correct" : "wrong"}`}>{correct ? "Bonne réponse !" : `Réponse attendue : ${expected}`}<button onClick={onNext}>Question suivante <ChevronRight /></button></div>}</article>;
 }
 
-function ExamQuestion({ level, index, time, answer, onAnswer, onNext, onAbandon }: { level: number; index: number; time: number; answer: string | null; onAnswer: (value: string) => void; onNext: () => void; onAbandon: () => void }) {
-  const words = vocabulary.filter((item) => item.level <= level);
+function ExamQuestion({ pool, level, index, time, answer, onAnswer, onNext, onAbandon }: { pool: VocabularyWord[]; level: number; index: number; time: number; answer: string | null; onAnswer: (value: string) => void; onNext: () => void; onAbandon: () => void }) {
+  const words = pool.filter((item) => item.level <= level);
   const word = words[index % words.length];
-  return <div className="exam-live"><div className="exam-head"><b>{Math.floor(time / 60).toString().padStart(2, "0")}:{(time % 60).toString().padStart(2, "0")}</b><span>Question {index + 1} / 20</span></div><div className="exam-progress"><i style={{ width: `${((index + 1) / 20) * 100}%` }} /></div><p>Quel caractère signifie « {word.french} » ?</p><div className="answer-options">{choiceValues(word, "hanzi").map((choice) => <button key={choice} disabled={answer !== null} className={answer ? (choice === word.hanzi ? "correct" : answer === choice ? "wrong" : "") : ""} onClick={() => onAnswer(choice)}>{choice}</button>)}</div>{answer && <button className="coral" onClick={onNext}>{index === 19 ? "Terminer" : "Question suivante"}</button>}<button className="text-button danger" onClick={onAbandon}>Abandonner l’examen</button></div>;
+  return <div className="exam-live"><div className="exam-head"><b>{Math.floor(time / 60).toString().padStart(2, "0")}:{(time % 60).toString().padStart(2, "0")}</b><span>Question {index + 1} / 20</span></div><div className="exam-progress"><i style={{ width: `${((index + 1) / 20) * 100}%` }} /></div><p>Quel caractère signifie « {word.french} » ?</p><div className="answer-options">{choiceValues(pool, word, "hanzi").map((choice) => <button key={choice} disabled={answer !== null} className={answer ? (choice === word.hanzi ? "correct" : answer === choice ? "wrong" : "") : ""} onClick={() => onAnswer(choice)}>{choice}</button>)}</div>{answer && <button className="coral" onClick={onNext}>{index === 19 ? "Terminer" : "Question suivante"}</button>}<button className="text-button danger" onClick={onAbandon}>Abandonner l’examen</button></div>;
 }
 
 // Supabase rows are runtime-validated by the database constraints and RLS schema.

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -33,9 +33,18 @@ export const metadata: Metadata = {
   },
   appleWebApp: { capable: true, title: "Hanzi Horizon", statusBarStyle: "default" },
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: [{ url: "/icon-192.png", type: "image/png", sizes: "192x192" }],
+    shortcut: "/icon-192.png",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#315f52",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -49,6 +58,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        {process.env.NODE_ENV === "production" && <script src="/register-sw.js" defer />}
       </body>
     </html>
   );
