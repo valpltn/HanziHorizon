@@ -30,14 +30,17 @@ test("all planned product surfaces and explicit button effects are present", asy
 });
 
 test("Supabase is the only remote user data source", async () => {
-  const [pkgSource, hostingSource] = await Promise.all([
+  const [pkgSource, hostingSource, supabaseConfig] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/lib/supabase-config.ts", import.meta.url), "utf8"),
   ]);
   const hosting = JSON.parse(hostingSource);
 
   assert.equal(hosting.d1, null);
   assert.doesNotMatch(pkgSource, /drizzle/i);
+  assert.match(supabaseConfig, /NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
+  assert.doesNotMatch(supabaseConfig, /service_role|service-role/i);
   await assert.rejects(readFile(new URL("../db/schema.ts", import.meta.url), "utf8"));
   await assert.rejects(readFile(new URL("../app/api/catalog/route.ts", import.meta.url), "utf8"));
 });

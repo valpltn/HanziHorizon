@@ -1,12 +1,13 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { supabasePublishableKey, supabaseUrl } from "./supabase-config";
 
 let client: ReturnType<typeof createBrowserClient> | undefined;
 
 export function getSupabaseBrowserClient() {
   if (!client) {
     client = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+      supabaseUrl,
+      supabasePublishableKey,
     );
   }
   return client;
