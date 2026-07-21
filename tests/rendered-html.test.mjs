@@ -57,3 +57,27 @@ test("the complete HSK 3.0 catalog is available with French definitions", async 
     { "1": 500, "2": 772, "3": 973, "4": 1000, "5": 1071, "6": 1140, "7": 5636 },
   );
 });
+
+test("the guided HSK path contains multiple phased lessons for every theme", async () => {
+  const [pathSource, vocabularySource, catalogSource] = await Promise.all([
+    readFile(new URL("../app/data/lesson-path.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/data/hsk-vocabulary.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/data/catalog.ts", import.meta.url), "utf8"),
+  ]);
+  const path = JSON.parse(pathSource);
+  const imported = JSON.parse(vocabularySource);
+  const curatedIds = [...catalogSource.matchAll(/id:"([^"]+)",hanzi:/g)].map((match) => match[1]);
+  const validWordIds = new Set([...imported.map((word) => word.id), ...curatedIds]);
+  assert.equal(path.length, 84);
+  for (const level of [1, 2, 3, 4, 5, 6, 7]) {
+    const levelLessons = path.filter((lesson) => lesson.level === level);
+    assert.equal(levelLessons.length, 12);
+    assert.equal(new Set(levelLessons.map((lesson) => lesson.unitId)).size, 4);
+  }
+  for (const unitId of new Set(path.map((lesson) => lesson.unitId))) {
+    const phases = path.filter((lesson) => lesson.unitId === unitId).map((lesson) => lesson.kind);
+    assert.deepEqual(phases, ["discover", "practice", "checkpoint"]);
+  }
+  assert.ok(path.every((lesson) => lesson.words.length >= 5 && lesson.words.length <= 12));
+  assert.ok(path.every((lesson) => lesson.words.every((id) => validWordIds.has(id))));
+});

@@ -19,7 +19,7 @@ import {
 } from "../lib/learning-store";
 import { getSupabaseBrowserClient } from "../lib/supabase-client";
 import type {
-  LearningSnapshot, QuizResult, QuizType, ReviewEvent, ReviewRating, ReviewState,
+  LearningSnapshot, Lesson, QuizResult, QuizType, ReviewEvent, ReviewRating, ReviewState,
   VocabularyWord,
 } from "../types/learning";
 import { AuthDialog } from "./AuthDialog";
@@ -84,6 +84,9 @@ export function LearningApp() {
   const [filterStatus, setFilterStatus] = useState("tous");
   const [visibleWordCount, setVisibleWordCount] = useState(libraryPageSize);
   const [lessonId, setLessonId] = useState<string | null>(null);
+  const [lessonLevel, setLessonLevel] = useState(1);
+  const [lessonPracticeIds, setLessonPracticeIds] = useState<string[] | null>(null);
+  const [lessonPracticeIndex, setLessonPracticeIndex] = useState(0);
   const [quizType, setQuizType] = useState<QuizType>("multiple-choice");
   const [quizInput, setQuizInput] = useState("");
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
@@ -100,8 +103,9 @@ export function LearningApp() {
 
   const word = vocabulary[wordIndex % vocabulary.length];
   const stats = useMemo(() => calculateStats(snapshot.progress, snapshot.reviewEvents, snapshot.quizResults, totalByLevel), [snapshot]);
-  const dueWords = useMemo(() => vocabulary.filter((item) => !snapshot.progress[item.id]?.dueAt || new Date(snapshot.progress[item.id].dueAt!) <= new Date()), [snapshot.progress]);
-  const reviewWord = dueWords[wordIndex % Math.max(1, dueWords.length)] ?? word;
+  const reviewPool = useMemo(() => lessonPracticeIds ? vocabulary.filter((item) => lessonPracticeIds.includes(item.id)) : vocabulary, [lessonPracticeIds]);
+  const dueWords = useMemo(() => reviewPool.filter((item) => !snapshot.progress[item.id]?.dueAt || new Date(snapshot.progress[item.id].dueAt!) <= new Date()), [reviewPool, snapshot.progress]);
+  const reviewWord = lessonPracticeIds ? (reviewPool[lessonPracticeIndex] ?? word) : (dueWords[wordIndex % Math.max(1, dueWords.length)] ?? word);
   const themes = useMemo(() => ["Tous", ...new Set(vocabulary.map((item) => item.theme))], []);
   const today = new Date().toISOString().slice(0, 10);
   const learnedToday = new Set(snapshot.reviewEvents.filter((event) => event.correct && event.createdAt.startsWith(today)).map((event) => event.wordId)).size;
@@ -203,7 +207,42 @@ export function LearningApp() {
   }
 
   function goTo(nextSection: Section) { setSection(nextSection); setMenuOpen(false); setNotice(""); setVisibleWordCount(libraryPageSize); }
-  function nextWord() { setWordIndex((value) => (value + 1) % vocabulary.length); setRevealed(false); setQuickAnswer(null); setReviewRating(null); setQuizAnswer(null); setQuizInput(""); lastQuizSubmission.current = ""; actionStarted.current = Date.now(); }
+  function lessonProgressValue(item: Lesson) {
+    if (!item.words.length) return 0;
+    const targetMastery = item.kind === "discover" ? 1 : item.kind === "practice" ? 2 : 3;
+    const learned = item.words.filter((id) => (snapshot.progress[id]?.mastery ?? 0) >= targetMastery).length;
+    return Math.round((learned / item.words.length) * 100);
+  }
+  function isLessonComplete(item: Lesson) { return lessonProgressValue(item) >= 80; }
+  function isLessonUnlocked(item: Lesson) {
+    const unitIndex = lessonUnits.findIndex((unit) => unit[0]?.unitId === item.unitId);
+    if (unitIndex > 0) {
+      const previousCheckpoint = lessonUnits[unitIndex - 1]?.at(-1);
+      if (previousCheckpoint && !isLessonComplete(previousCheckpoint)) return false;
+    }
+    if (item.lessonOrder > 1) {
+      const previousLesson = lessonUnits[unitIndex]?.find((candidate) => candidate.lessonOrder === item.lessonOrder - 1);
+      if (previousLesson && !isLessonComplete(previousLesson)) return false;
+    }
+    return true;
+  }
+  function startLesson(item: Lesson) {
+    setLessonPracticeIds(item.words);
+    setLessonPracticeIndex(0);
+    setReviewActive(true);
+    setReviewRating(null);
+    actionStarted.current = Date.now();
+    goTo("review");
+  }
+  function nextWord() {
+    if (lessonPracticeIds) {
+      if (lessonPracticeIndex >= reviewPool.length - 1) {
+        setLessonPracticeIds(null); setLessonPracticeIndex(0); setReviewActive(false); setLessonId(null);
+        goTo("lessons"); setNotice("Leçon terminée. Ton prochain parcours est prêt.");
+      } else setLessonPracticeIndex((value) => value + 1);
+    } else setWordIndex((value) => (value + 1) % vocabulary.length);
+    setRevealed(false); setQuickAnswer(null); setReviewRating(null); setQuizAnswer(null); setQuizInput(""); lastQuizSubmission.current = ""; actionStarted.current = Date.now();
+  }
 
   async function toggleFavorite(item: VocabularyWord) {
     const state = { ...(snapshot.progress[item.id] ?? initialProgress(item.id)), favorite: !(snapshot.progress[item.id]?.favorite ?? false) };
@@ -283,6 +322,13 @@ export function LearningApp() {
   const syncLabel = sync === "syncing" ? "Enregistrement…" : sync === "synced" ? "Synchronisé" : sync === "offline" ? "À resynchroniser" : "Enregistré sur cet appareil";
   const lesson = lessons.find((item) => item.id === lessonId);
   const lessonWords = lesson ? vocabulary.filter((item) => lesson.words.includes(item.id)) : [];
+  const lessonUnits = useMemo(() => {
+    const grouped = new Map<string, Lesson[]>();
+    for (const item of lessons.filter((candidate) => candidate.level === lessonLevel)) {
+      grouped.set(item.unitId, [...(grouped.get(item.unitId) ?? []), item]);
+    }
+    return [...grouped.values()].map((unitLessons) => unitLessons.sort((a, b) => a.lessonOrder - b.lessonOrder));
+  }, [lessonLevel]);
 
   return <main className="learning-app">
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -326,11 +372,11 @@ export function LearningApp() {
       </>}
 
       {!loading && section === "review" && <section className="review-panel">
-        <div className="review-summary"><div><span className="eyebrow">FILE DU JOUR</span><h2>{dueWords.length} mot{dueWords.length > 1 ? "s" : ""} à réviser</h2><p>Les intervalles s’adaptent à chacune de tes réponses.</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> Commencer la session</button></div>
+        <div className="review-summary"><div><span className="eyebrow">{lessonPracticeIds ? "LEÇON GUIDÉE" : "FILE DU JOUR"}</span><h2>{lessonPracticeIds ? `${lessonPracticeIndex + 1} / ${reviewPool.length} · ${lesson?.theme ?? "Parcours thématique"}` : `${dueWords.length} mot${dueWords.length > 1 ? "s" : ""} à réviser`}</h2><p>{lessonPracticeIds ? "Découvre, rappelle puis consolide chaque mot de la leçon." : "Les intervalles s’adaptent à chacune de tes réponses."}</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> {lessonPracticeIds ? "Continuer" : "Commencer la session"}</button></div>
         {reviewActive ? <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
       </section>}
 
-      {!loading && section === "lessons" && <section>{lesson ? <div className="lesson-detail"><button className="text-button" onClick={() => setLessonId(null)}>← Toutes les leçons</button><span className="eyebrow">NIVEAU {lesson.level}</span><h2>{lesson.title}</h2><p>{lesson.theme}</p><div className="lesson-words">{lessonWords.map((item) => <article key={item.id}><b>{item.hanzi}</b><span>{item.pinyin}</span><p>{item.french}</p><button onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /></button></article>)}</div><button className="coral" onClick={() => { setLessonId(null); goTo("review"); setReviewActive(true); }}>S’entraîner avec cette leçon</button></div> : <div className="lesson-grid">{lessons.map((item) => <article className={`lesson ${item.locked ? "locked" : ""}`} key={item.id}><span>NIVEAU {item.level}</span><h2>{item.title}</h2><p>{item.theme}</p><div className="lesson-foot"><small>{item.locked ? "Termine le niveau précédent" : `${item.words.length} mots · 8 min`}</small><button disabled={item.locked} onClick={() => setLessonId(item.id)}>{item.locked ? <><LockKeyhole /> Verrouillé</> : "Ouvrir →"}</button></div></article>)}</div>}</section>}
+      {!loading && section === "lessons" && <section className="lesson-path">{lesson ? <div className="lesson-detail"><button className="text-button" onClick={() => setLessonId(null)}>← Retour au parcours</button><span className="eyebrow">{levelLabel(lesson.level)} · {lesson.kind === "discover" ? "DÉCOUVERTE" : lesson.kind === "practice" ? "PRATIQUE" : "DÉFI"}</span><h2>{lesson.title}</h2><p>{lesson.goal}</p><div className="lesson-meta"><span><Clock3 /> {lesson.durationMinutes} min</span><span><Sparkles /> {lesson.xp} XP</span><span><Check /> {lessonProgressValue(lesson)} % acquis</span></div><div className="lesson-words">{lessonWords.map((item) => <article key={item.id}><b>{item.hanzi}</b><span>{item.pinyin}</span><p>{item.french}</p><button onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /></button></article>)}</div><button className="coral" onClick={() => startLesson(lesson)}><Play /> {lessonProgressValue(lesson) ? "Reprendre la leçon" : "Commencer la leçon"}</button></div> : <><div className="path-intro"><div><span className="eyebrow">PARCOURS HSK GUIDÉ</span><h2>Avance thème par thème</h2><p>Chaque unité répète le même vocabulaire en trois étapes : découverte, mise en situation et défi.</p></div><div className="level-progress"><b>{Math.round(lessons.filter((item) => item.level === lessonLevel).reduce((sum, item) => sum + lessonProgressValue(item), 0) / Math.max(1, lessons.filter((item) => item.level === lessonLevel).length))}%</b><span>du niveau</span></div></div><div className="level-tabs" role="tablist" aria-label="Choisir un niveau HSK">{levelOptions.map((value) => <button role="tab" aria-selected={lessonLevel === value} className={lessonLevel === value ? "active" : ""} key={value} onClick={() => { setLessonLevel(value); setLessonId(null); }}>{levelLabel(value)}</button>)}</div><div className="unit-list">{lessonUnits.map((unitLessons, unitIndex) => { const unit = unitLessons[0]; const unitLocked = unitIndex > 0 && !isLessonComplete(lessonUnits[unitIndex - 1].at(-1)!); const unitProgress = Math.round(unitLessons.reduce((sum, item) => sum + lessonProgressValue(item), 0) / unitLessons.length); return <article className={`lesson-unit ${unitLocked ? "locked" : ""}`} key={unit.unitId}><header><div><span>UNITÉ {unit.unitOrder}</span><h2>{unit.unitTitle}</h2><p>{unit.unitDescription}</p></div><div className="unit-progress"><b>{unitProgress}%</b><i><span style={{ width: `${unitProgress}%` }} /></i></div></header><div className="lesson-nodes">{unitLessons.map((item) => { const unlocked = isLessonUnlocked(item); const progress = lessonProgressValue(item); const complete = isLessonComplete(item); return <button key={item.id} disabled={!unlocked} className={`lesson-node ${item.kind} ${complete ? "complete" : ""}`} onClick={() => setLessonId(item.id)}><span className="node-icon">{!unlocked ? <LockKeyhole /> : complete ? <Check /> : item.kind === "checkpoint" ? <Sparkles /> : <GraduationCap />}</span><span><small>{item.kind === "discover" ? "1 · Découvrir" : item.kind === "practice" ? "2 · En situation" : "3 · Défi"}</small><b>{item.words.length} mots · {item.durationMinutes} min</b><i><span style={{ width: `${progress}%` }} /></i></span></button>; })}</div></article>; })}</div></>}</section>}
 
       {!loading && (section === "library" || section === "favorites") && <section className="library-view"><div className="library-head"><div><h2>{section === "favorites" ? "Tes favoris" : "Tout le vocabulaire"}</h2><p>{source.title} · {source.version}</p><small>{libraryResults.length.toLocaleString("fr-FR")} résultat{libraryResults.length > 1 ? "s" : ""}</small></div><label className="search"><Search /><input value={search} onChange={(event) => { setSearch(event.target.value); setVisibleWordCount(libraryPageSize); }} placeholder="Mot, pinyin ou français" /></label></div><div className="filters"><select value={filterLevel} onChange={(event) => { setFilterLevel(Number(event.target.value)); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par niveau"><option value={0}>Tous les niveaux</option>{levelOptions.map((value) => <option key={value} value={value}>{levelLabel(value)}</option>)}</select><select value={filterTheme} onChange={(event) => { setFilterTheme(event.target.value); setVisibleWordCount(libraryPageSize); }} aria-label="Filtrer par thème">{themes.map((item) => <option key={item}>{item}</option>)}</select><select value={section === "favorites" ? "favoris" : filterStatus} onChange={(event) => { setFilterStatus(event.target.value); setVisibleWordCount(libraryPageSize); }} disabled={section === "favorites"} aria-label="Filtrer par statut"><option value="tous">Tous les statuts</option><option value="favoris">Favoris</option><option value="appris">Déjà vus</option><option value="a-revoir">À revoir</option></select></div><div className="word-table">{visibleLibraryWords.map((item) => <article key={item.id}><button className="favorite" onClick={() => void toggleFavorite(item)} aria-label={snapshot.progress[item.id]?.favorite ? "Retirer des favoris" : "Ajouter aux favoris"}>{snapshot.progress[item.id]?.favorite ? "★" : "☆"}</button><b>{item.hanzi}</b><span>{item.pinyin}</span><span>{item.french}</span><small>{levelLabel(item.level)} · {item.theme}</small><button className="listen" onClick={() => speak(item.hanzi)}><Volume2 /> Écouter</button></article>)}{!libraryResults.length && <div className="empty-state"><Search /><h3>Aucun mot trouvé</h3><p>Modifie les filtres ou ajoute des favoris depuis la bibliothèque.</p></div>}</div>{visibleWordCount < libraryResults.length && <button className="coral library-more" onClick={() => setVisibleWordCount((count) => count + libraryPageSize)}>Afficher 120 mots de plus</button>}<p className="source-credit">Définitions françaises : <a href={source.dictionaryUrl} target="_blank" rel="noreferrer">CFDICT</a> · Liste HSK : <a href={source.url} target="_blank" rel="noreferrer">ivankra/hsk30</a></p></section>}
 

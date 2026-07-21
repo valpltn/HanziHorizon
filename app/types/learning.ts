@@ -16,10 +16,18 @@ export type VocabularyWord = {
 export type Lesson = {
   id: string;
   level: number;
+  unitId: string;
+  unitTitle: string;
+  unitDescription: string;
+  unitOrder: number;
+  lessonOrder: number;
+  kind: "discover" | "practice" | "checkpoint";
   title: string;
   theme: string;
+  goal: string;
+  durationMinutes: number;
+  xp: number;
   words: string[];
-  locked?: boolean;
 };
 
 export type ReviewState = {

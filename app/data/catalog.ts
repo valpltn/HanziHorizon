@@ -1,5 +1,6 @@
 import type { Lesson, VocabularyWord } from "../types/learning";
 import importedVocabulary from "./hsk-vocabulary.json";
+import lessonPath from "./lesson-path.json";
 
 export type { Lesson, VocabularyWord } from "../types/learning";
 
@@ -30,13 +31,7 @@ export const vocabulary: VocabularyWord[] = [
   ...(importedVocabulary as VocabularyWord[]).filter((word) => !curatedHanzi.has(word.hanzi)),
 ];
 
-export const lessons: Lesson[] = [
-  { id:"l1-greetings",level:1,title:"Saluer et se présenter",theme:"Fondations",words:["l1-ni","l1-wo","l1-hao","l1-shi","l1-xiexie"] },
-  { id:"l1-daily",level:1,title:"La vie quotidienne",theme:"Fondations",words:["l1-xuexiao","l1-zhongguo","l1-ren","l1-zaijian"] },
-  { id:"l2-routine",level:2,title:"Raconter sa journée",theme:"Temps & loisirs",words:["l2-jintian","l2-xihuan","l2-dianshi","l2-gongzuo"] },
-  { id:"l3-plans",level:3,title:"Parler de ses projets",theme:"Autonomie",words:["l3-zhunbei","l3-jingli","l3-jiankang"] },
-  ...[4,5,6,7,8,9].map(level => ({id:`l${level}-roadmap`,level,title:`Niveau ${level}`,theme:"Programme complet",words:[],locked:true})),
-];
+export const lessons = lessonPath as Lesson[];
 
 export const source = {
   title: "HSK 3.0 · définitions françaises CFDICT",
