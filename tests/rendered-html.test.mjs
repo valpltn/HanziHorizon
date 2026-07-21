@@ -68,11 +68,11 @@ test("the guided HSK path contains multiple phased lessons for every theme", asy
   const imported = JSON.parse(vocabularySource);
   const curatedIds = [...catalogSource.matchAll(/id:"([^"]+)",hanzi:/g)].map((match) => match[1]);
   const validWordIds = new Set([...imported.map((word) => word.id), ...curatedIds]);
-  assert.equal(path.length, 84);
+  assert.equal(path.length, 336);
   for (const level of [1, 2, 3, 4, 5, 6, 7]) {
     const levelLessons = path.filter((lesson) => lesson.level === level);
-    assert.equal(levelLessons.length, 12);
-    assert.equal(new Set(levelLessons.map((lesson) => lesson.unitId)).size, 4);
+    assert.equal(levelLessons.length, 48);
+    assert.equal(new Set(levelLessons.map((lesson) => lesson.unitId)).size, 16);
   }
   for (const unitId of new Set(path.map((lesson) => lesson.unitId))) {
     const phases = path.filter((lesson) => lesson.unitId === unitId).map((lesson) => lesson.kind);
@@ -80,4 +80,7 @@ test("the guided HSK path contains multiple phased lessons for every theme", asy
   }
   assert.ok(path.every((lesson) => lesson.words.length >= 5 && lesson.words.length <= 12));
   assert.ok(path.every((lesson) => lesson.words.every((id) => validWordIds.has(id))));
+  const app = await readFile(new URL("../app/components/LearningApp.tsx", import.meta.url), "utf8");
+  for (const mode of ["word-zh-fr", "word-fr-zh", "sentence-zh-fr", "sentence-fr-zh", "cloze"]) assert.match(app, new RegExp(mode));
+  assert.match(app, /Lanterne de maîtrise/);
 });

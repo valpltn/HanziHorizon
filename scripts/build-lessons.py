@@ -86,9 +86,9 @@ def main() -> None:
         for level in CURRICULUM
     }
     lessons = []
+    chapter_names = ["Fondations", "Réflexes", "Dialogues", "Maîtrise"]
     for level, units in CURRICULUM.items():
-        unused = {word["id"] for word in by_level[level]}
-        for unit_order, (unit_title, unit_description, keywords) in enumerate(units, start=1):
+        for base_order, (unit_title, unit_description, keywords) in enumerate(units, start=1):
             normalized_keywords = [normalize(keyword) for keyword in keywords]
             def relevance(word: dict) -> int:
                 definition = normalize(word["french"])
@@ -97,39 +97,31 @@ def main() -> None:
                     for keyword in normalized_keywords
                     if re.search(rf"\b{re.escape(keyword)}\b", definition)
                 )
-            matches = [
-                word for word in by_level[level]
-                if word["id"] in unused
-                and relevance(word) > 0
-            ]
+            matches = [word for word in by_level[level] if relevance(word) > 0]
             matches.sort(key=lambda word: (-relevance(word), word["id"]))
-            selected = matches[:12]
-            if len(selected) < 6:
-                supplemental = [
-                    word for word in by_level[level]
-                    if word not in selected and relevance(word) > 0
-                ]
-                supplemental.sort(key=lambda word: (-relevance(word), word["id"]))
-                selected.extend(supplemental[:6 - len(selected)])
-            for word in selected:
-                unused.discard(word["id"])
-            for lesson_order, (kind, phase_title, goal, duration, xp) in enumerate(PHASES, start=1):
-                lessons.append({
-                    "id": f"hsk-{level}-u{unit_order}-l{lesson_order}",
-                    "level": level,
-                    "unitId": f"hsk-{level}-u{unit_order}",
-                    "unitTitle": unit_title,
-                    "unitDescription": unit_description,
-                    "unitOrder": unit_order,
-                    "lessonOrder": lesson_order,
-                    "kind": kind,
-                    "title": f"{phase_title} · {unit_title}",
-                    "theme": unit_title,
-                    "goal": goal,
-                    "durationMinutes": duration,
-                    "xp": xp,
-                    "words": [overrides.get(word["hanzi"], word["id"]) for word in selected],
-                })
+            pool = matches + [word for word in by_level[level] if word not in matches]
+            for chapter, chapter_name in enumerate(chapter_names):
+                unit_order = (base_order - 1) * 4 + chapter + 1
+                start = (chapter * 6) % max(1, len(pool))
+                selected = (pool + pool)[start:start + 6]
+                chapter_title = f"{unit_title} · {chapter_name}"
+                for lesson_order, (kind, phase_title, goal, duration, xp) in enumerate(PHASES, start=1):
+                    lessons.append({
+                        "id": f"hsk-{level}-u{unit_order}-l{lesson_order}",
+                        "level": level,
+                        "unitId": f"hsk-{level}-u{unit_order}",
+                        "unitTitle": chapter_title,
+                        "unitDescription": unit_description,
+                        "unitOrder": unit_order,
+                        "lessonOrder": lesson_order,
+                        "kind": kind,
+                        "title": f"{phase_title} · {chapter_title}",
+                        "theme": unit_title,
+                        "goal": f"{goal} Traduire des mots et des phrases dans les deux sens.",
+                        "durationMinutes": duration,
+                        "xp": xp * 2,
+                        "words": [overrides.get(word["hanzi"], word["id"]) for word in selected],
+                    })
 
     OUTPUT.write_text(json.dumps(lessons, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Generated {len(lessons)} lessons across {len(CURRICULUM)} HSK levels in {OUTPUT}")

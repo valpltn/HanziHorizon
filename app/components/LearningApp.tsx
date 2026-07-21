@@ -56,6 +56,9 @@ const quizTypes: { id: QuizType; title: string; text: string }[] = [
 ];
 const totalByLevel = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 1, vocabulary.filter((word) => word.level === i + 1).length]));
 const newId = () => crypto.randomUUID();
+const guidedKinds = ["word-zh-fr", "word-fr-zh", "sentence-zh-fr", "sentence-fr-zh", "cloze"] as const;
+type GuidedKind = typeof guidedKinds[number];
+const normalizeGuidedAnswer = (value: string) => value.toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s.,!?;:'’\-，。！？；：]/g, "");
 const initialProgress = (wordId: string): ReviewState => ({ wordId, favorite: false, mastery: 0, repetitions: 0, intervalDays: 0, dueAt: null, lastRating: null, lastSeenAt: null });
 const choiceValues = (word: VocabularyWord, field: "hanzi" | "french") => [word, ...vocabulary.filter((item) => item.id !== word.id).slice(0, 3)].map((item) => item[field]).sort((a, b) => a.localeCompare(b, "zh"));
 const toProgressRow = (userId: string, state: ReviewState) => ({ user_id: userId, word_id: state.wordId, favorite: state.favorite, mastery: state.mastery, repetitions: state.repetitions, interval_days: state.intervalDays, due_at: state.dueAt, last_rating: state.lastRating, last_seen_at: state.lastSeenAt, updated_at: new Date().toISOString() });
@@ -87,6 +90,10 @@ export function LearningApp() {
   const [lessonLevel, setLessonLevel] = useState(1);
   const [lessonPracticeIds, setLessonPracticeIds] = useState<string[] | null>(null);
   const [lessonPracticeIndex, setLessonPracticeIndex] = useState(0);
+  const [guidedResult, setGuidedResult] = useState<{ correct: boolean; expected: string } | null>(null);
+  const [guidedInput, setGuidedInput] = useState("");
+  const [guidedXp, setGuidedXp] = useState(0);
+  const [guidedCombo, setGuidedCombo] = useState(0);
   const [quizType, setQuizType] = useState<QuizType>("multiple-choice");
   const [quizInput, setQuizInput] = useState("");
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
@@ -103,6 +110,9 @@ export function LearningApp() {
 
   const word = vocabulary[wordIndex % vocabulary.length];
   const stats = useMemo(() => calculateStats(snapshot.progress, snapshot.reviewEvents, snapshot.quizResults, totalByLevel), [snapshot]);
+  const totalXp = snapshot.reviewEvents.filter((event) => event.correct).length * 5 + stats.masteredWords * 10;
+  const lanternLevel = Math.floor(totalXp / 250) + 1;
+  const lanternProgress = totalXp % 250;
   const reviewPool = useMemo(() => lessonPracticeIds ? vocabulary.filter((item) => lessonPracticeIds.includes(item.id)) : vocabulary, [lessonPracticeIds]);
   const dueWords = useMemo(() => reviewPool.filter((item) => !snapshot.progress[item.id]?.dueAt || new Date(snapshot.progress[item.id].dueAt!) <= new Date()), [reviewPool, snapshot.progress]);
   const reviewWord = lessonPracticeIds ? (reviewPool[lessonPracticeIndex] ?? word) : (dueWords[wordIndex % Math.max(1, dueWords.length)] ?? word);
@@ -231,8 +241,37 @@ export function LearningApp() {
     setLessonPracticeIndex(0);
     setReviewActive(true);
     setReviewRating(null);
+    setGuidedResult(null);
+    setGuidedInput("");
+    setGuidedXp(0);
+    setGuidedCombo(0);
     actionStarted.current = Date.now();
     goTo("review");
+  }
+  async function answerGuided(value: string, kind: GuidedKind, target: VocabularyWord) {
+    if (guidedResult) return;
+    const expected = kind === "word-zh-fr" ? target.french
+      : kind === "word-fr-zh" || kind === "cloze" ? target.hanzi
+      : kind === "sentence-zh-fr" ? target.exampleFr : target.example;
+    const correct = normalizeGuidedAnswer(value) === normalizeGuidedAnswer(expected);
+    setGuidedResult({ correct, expected });
+    if (correct) {
+      const bonus = 5 + Math.min(10, guidedCombo * 2);
+      setGuidedXp((xp) => xp + bonus);
+      setGuidedCombo((combo) => combo + 1);
+    } else setGuidedCombo(0);
+    await rateReview(correct ? "good" : "again", target, kind === "cloze" ? "cloze" : kind.includes("fr-zh") ? "reverse-choice" : "multiple-choice");
+  }
+  function nextGuided() {
+    if (lessonPracticeIndex >= 9) {
+      const earned = guidedXp;
+      setLessonPracticeIds(null); setLessonPracticeIndex(0); setReviewActive(false); setLessonId(null);
+      setGuidedResult(null); setGuidedInput("");
+      goTo("lessons"); setNotice(`Leçon terminée · ${earned} XP allument ta Lanterne de maîtrise.`);
+      return;
+    }
+    setLessonPracticeIndex((value) => value + 1);
+    setGuidedResult(null); setGuidedInput(""); setReviewRating(null); actionStarted.current = Date.now();
   }
   function nextWord() {
     if (lessonPracticeIds) {
@@ -336,6 +375,7 @@ export function LearningApp() {
       <nav aria-label="Navigation principale">{nav.map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon size={19} /><span>{label}</span></button>)}</nav>
       <div className="sidebar-art" />
       <div className="streak"><Flame /><div><b>{stats.streakDays} jour{stats.streakDays > 1 ? "s" : ""}</b><small>de régularité</small></div></div>
+      <div className="lantern-mini"><Sparkles /><div><b>Lanterne {lanternLevel}</b><small>{lanternProgress} / 250 XP</small><i><span style={{ width: `${(lanternProgress / 250) * 100}%` }} /></i></div></div>
     </aside>
     {menuOpen && <button className="menu-backdrop" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu" />}
 
@@ -372,8 +412,8 @@ export function LearningApp() {
       </>}
 
       {!loading && section === "review" && <section className="review-panel">
-        <div className="review-summary"><div><span className="eyebrow">{lessonPracticeIds ? "LEÇON GUIDÉE" : "FILE DU JOUR"}</span><h2>{lessonPracticeIds ? `${lessonPracticeIndex + 1} / ${reviewPool.length} · ${lesson?.theme ?? "Parcours thématique"}` : `${dueWords.length} mot${dueWords.length > 1 ? "s" : ""} à réviser`}</h2><p>{lessonPracticeIds ? "Découvre, rappelle puis consolide chaque mot de la leçon." : "Les intervalles s’adaptent à chacune de tes réponses."}</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> {lessonPracticeIds ? "Continuer" : "Commencer la session"}</button></div>
-        {reviewActive ? <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
+        <div className="review-summary"><div><span className="eyebrow">{lessonPracticeIds ? "LEÇON DE TRADUCTION" : "FILE DU JOUR"}</span><h2>{lessonPracticeIds ? `${lessonPracticeIndex + 1} / 10 · ${lesson?.theme ?? "Parcours thématique"}` : `${dueWords.length} mot${dueWords.length > 1 ? "s" : ""} à réviser`}</h2><p>{lessonPracticeIds ? "Comprends, traduis, reconstruis puis produis la phrase." : "Les intervalles s’adaptent à chacune de tes réponses."}</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> {lessonPracticeIds ? "Continuer" : "Commencer la session"}</button></div>
+        {reviewActive ? lessonPracticeIds ? <GuidedLessonExercise word={reviewPool[lessonPracticeIndex % reviewPool.length] ?? reviewWord} kind={guidedKinds[lessonPracticeIndex % guidedKinds.length]} step={lessonPracticeIndex} total={10} input={guidedInput} result={guidedResult} xp={guidedXp} combo={guidedCombo} onInput={setGuidedInput} onSpeak={speak} onAnswer={(value, kind, target) => void answerGuided(value, kind, target)} onNext={nextGuided} /> : <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
       </section>}
 
       {!loading && section === "lessons" && <section className="lesson-path">{lesson ? <div className="lesson-detail"><button className="text-button" onClick={() => setLessonId(null)}>← Retour au parcours</button><span className="eyebrow">{levelLabel(lesson.level)} · {lesson.kind === "discover" ? "DÉCOUVERTE" : lesson.kind === "practice" ? "PRATIQUE" : "DÉFI"}</span><h2>{lesson.title}</h2><p>{lesson.goal}</p><div className="lesson-meta"><span><Clock3 /> {lesson.durationMinutes} min</span><span><Sparkles /> {lesson.xp} XP</span><span><Check /> {lessonProgressValue(lesson)} % acquis</span></div><div className="lesson-words">{lessonWords.map((item) => <article key={item.id}><b>{item.hanzi}</b><span>{item.pinyin}</span><p>{item.french}</p><button onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /></button></article>)}</div><button className="coral" onClick={() => startLesson(lesson)}><Play /> {lessonProgressValue(lesson) ? "Reprendre la leçon" : "Commencer la leçon"}</button></div> : <><div className="path-intro"><div><span className="eyebrow">PARCOURS HSK GUIDÉ</span><h2>Avance thème par thème</h2><p>Chaque unité répète le même vocabulaire en trois étapes : découverte, mise en situation et défi.</p></div><div className="level-progress"><b>{Math.round(lessons.filter((item) => item.level === lessonLevel).reduce((sum, item) => sum + lessonProgressValue(item), 0) / Math.max(1, lessons.filter((item) => item.level === lessonLevel).length))}%</b><span>du niveau</span></div></div><div className="level-tabs" role="tablist" aria-label="Choisir un niveau HSK">{levelOptions.map((value) => <button role="tab" aria-selected={lessonLevel === value} className={lessonLevel === value ? "active" : ""} key={value} onClick={() => { setLessonLevel(value); setLessonId(null); }}>{levelLabel(value)}</button>)}</div><div className="unit-list">{lessonUnits.map((unitLessons, unitIndex) => { const unit = unitLessons[0]; const unitLocked = unitIndex > 0 && !isLessonComplete(lessonUnits[unitIndex - 1].at(-1)!); const unitProgress = Math.round(unitLessons.reduce((sum, item) => sum + lessonProgressValue(item), 0) / unitLessons.length); return <article className={`lesson-unit ${unitLocked ? "locked" : ""}`} key={unit.unitId}><header><div><span>UNITÉ {unit.unitOrder}</span><h2>{unit.unitTitle}</h2><p>{unit.unitDescription}</p></div><div className="unit-progress"><b>{unitProgress}%</b><i><span style={{ width: `${unitProgress}%` }} /></i></div></header><div className="lesson-nodes">{unitLessons.map((item) => { const unlocked = isLessonUnlocked(item); const progress = lessonProgressValue(item); const complete = isLessonComplete(item); return <button key={item.id} disabled={!unlocked} className={`lesson-node ${item.kind} ${complete ? "complete" : ""}`} onClick={() => setLessonId(item.id)}><span className="node-icon">{!unlocked ? <LockKeyhole /> : complete ? <Check /> : item.kind === "checkpoint" ? <Sparkles /> : <GraduationCap />}</span><span><small>{item.kind === "discover" ? "1 · Découvrir" : item.kind === "practice" ? "2 · En situation" : "3 · Défi"}</small><b>{item.words.length} mots · {item.durationMinutes} min</b><i><span style={{ width: `${progress}%` }} /></i></span></button>; })}</div></article>; })}</div></>}</section>}
@@ -394,6 +434,25 @@ export function LearningApp() {
     {profileOpen && <><button className="panel-backdrop" onClick={() => setProfileOpen(false)} aria-label="Fermer le profil" /><aside className="profile-panel" aria-label="Profil"><button className="icon-button close-button" onClick={() => setProfileOpen(false)} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2>{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { setProfileOpen(false); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
     <AuthDialog key={`${authMode}-${authOpen}`} open={authOpen} initialMode={authMode} onClose={() => setAuthOpen(false)} />
   </main>;
+}
+
+function GuidedLessonExercise({ word, kind, step, total, input, result, xp, combo, onInput, onSpeak, onAnswer, onNext }: { word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; onInput: (value: string) => void; onSpeak: (value: string) => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {
+  const prompts: Record<GuidedKind, string> = {
+    "word-zh-fr": `Traduis « ${word.hanzi} » en français`,
+    "word-fr-zh": `Traduis « ${word.french} » en chinois`,
+    "sentence-zh-fr": `Traduis cette phrase en français : ${word.example}`,
+    "sentence-fr-zh": `Traduis cette phrase en chinois : ${word.exampleFr}`,
+    cloze: `Complète la phrase : ${word.example.includes(word.hanzi) ? word.example.replace(word.hanzi, "____") : `____ · ${word.pinyin}`}`,
+  };
+  const expected = kind === "word-zh-fr" ? word.french : kind === "word-fr-zh" || kind === "cloze" ? word.hanzi : kind === "sentence-zh-fr" ? word.exampleFr : word.example;
+  const choices = kind === "word-zh-fr" ? choiceValues(word, "french") : kind === "word-fr-zh" ? choiceValues(word, "hanzi") : [];
+  const freeInput = choices.length === 0;
+  return <article className="guided-lesson-card">
+    <div className="guided-head"><div><span>EXERCICE {step + 1} / {total}</span><i><b style={{ width: `${((step + 1) / total) * 100}%` }} /></i></div><div className={`xp-lantern ${combo >= 3 ? "glowing" : ""}`}><Sparkles /><span><b>{xp} XP</b><small>{combo > 1 ? `Série ×${combo}` : "Lanterne"}</small></span></div></div>
+    <div className="guided-prompt"><small>{kind.includes("sentence") ? "TRADUCTION DE PHRASE" : kind === "cloze" ? "PHRASE À COMPLÉTER" : "TRADUCTION ACTIVE"}</small><h3>{prompts[kind]}</h3>{kind.includes("zh-fr") || kind === "cloze" ? <button className="outline" onClick={() => onSpeak(kind.includes("sentence") ? word.example : word.hanzi)}><Volume2 /> Écouter</button> : null}</div>
+    {freeInput ? <div className="guided-input"><textarea value={input} disabled={result !== null} onChange={(event) => onInput(event.target.value)} placeholder={kind.includes("sentence") ? "Écris toute la phrase…" : "Écris ta réponse…"} /><button className="coral" disabled={!input.trim() || result !== null} onClick={() => onAnswer(input, kind, word)}>Vérifier ma traduction</button></div> : <div className="answer-options">{choices.map((choice) => <button key={choice} disabled={result !== null} className={result ? (normalizeGuidedAnswer(choice) === normalizeGuidedAnswer(expected) ? "correct" : "") : ""} onClick={() => onAnswer(choice, kind, word)}>{choice}</button>)}</div>}
+    {result && <div className={`guided-feedback ${result.correct ? "correct" : "wrong"}`}><div><b>{result.correct ? `Juste ! +${5 + Math.min(10, Math.max(0, combo - 1) * 2)} XP` : "À retravailler"}</b><span>{result.correct ? "Ta série renforce la lumière de ta Lanterne." : `Réponse attendue : ${result.expected}`}</span></div><button onClick={onNext}>{step + 1 === total ? "Terminer" : "Continuer"} <ChevronRight /></button></div>}
+  </article>;
 }
 
 function QuizExercise({ type, word, input, answer, onInput, onSpeak, onAnswer, onNext }: { type: QuizType; word: VocabularyWord; input: string; answer: string | null; onInput: (value: string) => void; onSpeak: () => void; onAnswer: (value: string) => void; onNext: () => void }) {
