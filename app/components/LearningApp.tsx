@@ -146,7 +146,7 @@ export function LearningApp() {
       ]);
       const firstError = [settings.error, progress.error, events.error, quizzes.error].find(Boolean);
       if (firstError) throw firstError;
-      const profile = await supabase.from("profiles").upsert({ id: activeUser.id, display_name: activeUser.email?.split("@")[0] ?? "Apprenant", updated_at: new Date().toISOString() });
+      const profile = await supabase.from("profiles").upsert({ user_id: activeUser.id, display_name: activeUser.email?.split("@")[0] ?? "Apprenant", updated_at: new Date().toISOString() });
       if (profile.error) throw profile.error;
       const cloudProgress: Record<string, ReviewState> = {};
       for (const row of progress.data ?? []) cloudProgress[row.word_id] = fromProgress(row);
