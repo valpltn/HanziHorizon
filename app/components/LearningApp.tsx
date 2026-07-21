@@ -469,6 +469,13 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
     <div className="garden-layout">
       <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" aria-label={`${treeProgress}% du ${levelName} terminé`}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
       <div className="tree-scene hsk-tree-scene">
+        <div className="garden-ink-decor" aria-hidden="true">
+          <img className="garden-ink-hills" src="/garden/ink-samples/ink-hills.png" alt="" />
+          <img className="garden-ink-bamboo" src="/garden/ink-samples-black/ink-bamboo-black.png" alt="" />
+          <img className="garden-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
+          <img className="garden-ink-moss" src="/garden/ink-samples/ink-moss-grass.png" alt="" />
+          <img className="garden-ink-petals" src="/garden/ink-samples-black/ink-petals-butterflies-black.png" alt="" />
+        </div>
         <img className="tree-locked" src={`/tree/hsk/hsk-${tree.level}-locked.png`} alt={`Arbre ${levelName}, ${tree.completedUnits} unités terminées`} />
         {tree.branches.map((state, index) => {
           const [left, top, angle] = gardenSlots[index];
