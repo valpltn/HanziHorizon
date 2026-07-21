@@ -7,10 +7,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import {
-  BarChart3, BrainCircuit, CalendarDays, Check, ChevronLeft, ChevronRight,
+  BarChart3, BookOpen, BrainCircuit, CalendarDays, Check, ChevronLeft, ChevronRight,
   Clock3, Cloud, CloudOff, Flame, GraduationCap, Heart, Library, LoaderCircle,
   LockKeyhole, LogIn, LogOut, Menu, PenLine, Play, RotateCcw, Search, Settings,
-  Sparkles, UserRound, Volume2, X,
+  Flower2, Leaf, Sparkles, Sprout, Trophy, UserRound, Volume2, X,
 } from "lucide-react";
 import { lessons, source, vocabulary } from "../data/catalog";
 import {
@@ -368,6 +368,7 @@ export function LearningApp() {
     }
     return [...grouped.values()].map((unitLessons) => unitLessons.sort((a, b) => a.lessonOrder - b.lessonOrder));
   }, [lessonLevel]);
+  const homeNextLesson = lessons.find((item) => item.level === snapshot.settings.activeLevel && !isLessonComplete(item)) ?? lessons[0];
 
   return <main className="learning-app">
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -389,7 +390,8 @@ export function LearningApp() {
       {notice && <div className="notice" role="status"><span>{notice}</span>{sync === "offline" && user && <button onClick={() => void loadCloud(user)}><RotateCcw /> Réessayer</button>}<button onClick={() => setNotice("")} aria-label="Fermer"><X /></button></div>}
       {loading && <div className="loading" role="status"><LoaderCircle className="spin" /> Chargement de ta progression…</div>}
 
-      {!loading && section === "today" && <>
+      {!loading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
+      {false && !loading && section === "today" && <>
         <div className="dashboard-grid">
           <article className="study-card">
             <img src="/bamboo-study.webp" alt="Bambous peints à l’encre" width={900} height={520} />
@@ -434,6 +436,27 @@ export function LearningApp() {
     {profileOpen && <><button className="panel-backdrop" onClick={() => setProfileOpen(false)} aria-label="Fermer le profil" /><aside className="profile-panel" aria-label="Profil"><button className="icon-button close-button" onClick={() => setProfileOpen(false)} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2>{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { setProfileOpen(false); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
     <AuthDialog key={`${authMode}-${authOpen}`} open={authOpen} initialMode={authMode} onClose={() => setAuthOpen(false)} />
   </main>;
+}
+
+function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, onContinue }: { totalXp: number; learnedToday: number; dailyGoal: number; streakDays: number; nextLesson: Lesson; onContinue: () => void }) {
+  const milestones = [
+    { xp: 1500, title: "Floraison", icon: Flower2 },
+    { xp: 3000, title: "Nouvelle branche", icon: Sprout },
+    { xp: 6000, title: "Fruit HSK", icon: Trophy },
+  ];
+  const nextMilestone = milestones.find((item) => totalXp < item.xp) ?? { xp: 12000, title: "Arbre ancestral", icon: Trophy };
+  const previousXp = [...milestones].reverse().find((item) => totalXp >= item.xp)?.xp ?? 0;
+  const milestoneProgress = Math.min(100, Math.round(((totalXp - previousXp) / Math.max(1, nextMilestone.xp - previousXp)) * 100));
+  const stage = totalXp >= 6000 ? "Arbre de maîtrise" : totalXp >= 3000 ? "Arbre ramifié" : totalXp >= 1500 ? "Arbre en fleurs" : "Jeune arbre";
+  return <section className={`home-garden stage-${previousXp}`}>
+    <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{stage} · Niveau {nextLesson.level === 7 ? "7–9" : nextLesson.level}</p></header>
+    <div className="garden-layout">
+      <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p>Prochain grand jalon :<br /><strong>{nextMilestone.title.toLocaleLowerCase("fr")} à {nextMilestone.xp.toLocaleString("fr-FR")} XP</strong></p><div className="garden-progress" aria-label={`${milestoneProgress}% vers ${nextMilestone.title}`}><i style={{ width: `${milestoneProgress}%` }} /></div><span><Leaf /> Les leçons nourrissent ton prochain jalon.</span></aside>
+      <div className="tree-scene"><img src="/tree/learning-tree.png" alt={`Arbre d’apprentissage, stade ${stage}`} /><div className="tree-word word-one"><b>你</b><small>nǐ</small></div><div className="tree-word word-two"><b>学</b><small>xué</small></div><div className="tree-word word-three"><b>爱</b><small>ài</small></div><div className="growth-event"><Sprout /><span><b>Unité terminée</b><small>Le prochain rameau se prépare.</small></span></div></div>
+      <aside className="next-garden-lesson"><BookOpen /><span>PRÊT À CONTINUER ?</span><h3>{nextLesson.theme}</h3><p>{nextLesson.title}</p><button className="coral" onClick={onContinue}>Continuer ma leçon <ChevronRight /></button><small>{learnedToday} / {dailyGoal} mots aujourd’hui · {streakDays} jour{streakDays > 1 ? "s" : ""} de série</small></aside>
+    </div>
+    <footer className="garden-milestones"><div><h3>Tes prochains jalons</h3><p>L’arbre reste stable entre deux grandes étapes.</p></div>{milestones.map(({ xp, title, icon: Icon }) => <article className={totalXp >= xp ? "reached" : ""} key={xp}><Icon /><span><b>{xp.toLocaleString("fr-FR")} XP</b><small>{title}</small></span></article>)}</footer>
+  </section>;
 }
 
 function GuidedLessonExercise({ word, kind, step, total, input, result, xp, combo, onInput, onSpeak, onAnswer, onNext }: { word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; onInput: (value: string) => void; onSpeak: (value: string) => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {

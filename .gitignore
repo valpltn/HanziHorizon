@@ -41,6 +41,7 @@ next-env.d.ts
 /outputs/
 /work/
 /test-results/
+/public/tree/*-source.png
 /.sites-stage-*/
 /.sites-dev*.log
 /.e2e-dev*
