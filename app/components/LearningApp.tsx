@@ -384,6 +384,11 @@ export function LearningApp() {
   const homeNextLesson = lessons.find((item) => item.level === activeGardenLevel && !isLessonComplete(item)) ?? lessons.find((item) => item.level === activeGardenLevel) ?? lessons[0];
 
   return <main className="learning-app">
+    <div className="app-ink-atmosphere" aria-hidden="true">
+      <img className="app-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
+      <img className="app-ink-pine" src="/garden/ink-samples-black/ink-pine-black.png" alt="" />
+      <img className="app-ink-bamboo" src="/garden/ink-samples/ink-bamboo.png" alt="" />
+    </div>
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
       <div className="mark"><span>学</span><b>Hanzi<br />Horizon</b><button className="mobile-close" onClick={() => setMenuOpen(false)} aria-label="Fermer le menu"><X /></button></div>
       <nav aria-label="Navigation principale">{nav.map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon size={19} /><span>{label}</span></button>)}</nav>
@@ -464,18 +469,18 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
   const branchCount = tree.branches.filter((state) => state !== "locked").length;
   const nextTree = trees.find((item) => !item.unlocked);
   return <section className="home-garden">
+    <div className="garden-landscape" aria-hidden="true">
+      <img className="garden-ink-hills" src="/garden/ink-samples/ink-hills.png" alt="" />
+      <img className="garden-ink-bamboo" src="/garden/ink-samples-black/ink-bamboo-black.png" alt="" />
+      <img className="garden-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
+      <img className="garden-ink-moss" src="/garden/ink-samples/ink-moss-grass.png" alt="" />
+      <img className="garden-ink-petals" src="/garden/ink-samples-black/ink-petals-butterflies-black.png" alt="" />
+    </div>
     <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{levelName} · {tree.completedUnits} / 16 unités en floraison</p></header>
     <div className="garden-level-picker" role="tablist" aria-label="Choisir l’arbre HSK">{trees.map((item) => <button role="tab" aria-selected={item.level === tree.level} className={item.level === tree.level ? "active" : ""} disabled={!item.unlocked} onClick={() => onSelectLevel(item.level)} key={item.level}>{item.unlocked ? `HSK ${item.level}` : <><LockKeyhole /> HSK {item.level}</>}</button>)}</div>
     <div className="garden-layout">
       <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" aria-label={`${treeProgress}% du ${levelName} terminé`}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
       <div className="tree-scene hsk-tree-scene">
-        <div className="garden-ink-decor" aria-hidden="true">
-          <img className="garden-ink-hills" src="/garden/ink-samples/ink-hills.png" alt="" />
-          <img className="garden-ink-bamboo" src="/garden/ink-samples-black/ink-bamboo-black.png" alt="" />
-          <img className="garden-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
-          <img className="garden-ink-moss" src="/garden/ink-samples/ink-moss-grass.png" alt="" />
-          <img className="garden-ink-petals" src="/garden/ink-samples-black/ink-petals-butterflies-black.png" alt="" />
-        </div>
         <img className="tree-locked" src={`/tree/hsk/hsk-${tree.level}-locked.png`} alt={`Arbre ${levelName}, ${tree.completedUnits} unités terminées`} />
         {tree.branches.map((state, index) => {
           const [left, top, angle] = gardenSlots[index];
