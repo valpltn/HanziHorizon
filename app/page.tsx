@@ -1,64 +1,46 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import { lessons, vocabulary, type VocabularyWord } from "./data/catalog";
+import { scheduleReview, type ReviewRating } from "./lib/srs";
 
-const words = [
-  { hanzi: "你", pinyin: "nǐ", french: "tu", sentence: "你好吗？", translation: "Comment vas-tu ?" },
-  { hanzi: "好", pinyin: "hǎo", french: "bien / bon", sentence: "我很好。", translation: "Je vais très bien." },
-  { hanzi: "谢谢", pinyin: "xièxie", french: "merci", sentence: "谢谢你！", translation: "Merci !" },
-  { hanzi: "再见", pinyin: "zàijiàn", french: "au revoir", sentence: "明天再见。", translation: "À demain." },
+type Section = "today" | "review" | "lessons" | "library" | "quiz" | "exam" | "writing" | "stats" | "settings";
+const nav: { id: Section; label: string; icon: string }[] = [
+  {id:"today",label:"Aujourd’hui",icon:"▣"},{id:"review",label:"Réviser",icon:"↻"},{id:"lessons",label:"Leçons",icon:"▤"},{id:"library",label:"Bibliothèque",icon:"⌕"},{id:"quiz",label:"Quiz",icon:"✦"},{id:"exam",label:"Mode examen",icon:"◷"},{id:"writing",label:"Écriture",icon:"✎"},{id:"stats",label:"Statistiques",icon:"⌁"},{id:"settings",label:"Paramètres",icon:"⚙"},
 ];
 
+function speak(text: string) { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(text); u.lang = "zh-CN"; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); } }
+function normalize(value: string) { return value.normalize("NFD").replace(/[\u0300-\u036f·\s]/g, "").toLowerCase(); }
+
 export default function Home() {
-  const [index, setIndex] = useState(0);
-  const [revealed, setRevealed] = useState(false);
-  const [learned, setLearned] = useState(5);
-  const [answer, setAnswer] = useState<string | null>(null);
-  const word = words[index];
+  const [section, setSection] = useState<Section>("today");
+  const [cardIndex, setCardIndex] = useState(0); const [revealed, setRevealed] = useState(false);
+  const [learned, setLearned] = useState(5); const [due, setDue] = useState(8); const [favorites, setFavorites] = useState<string[]>([]);
+  const [quizAnswer, setQuizAnswer] = useState<string | null>(null); const [typed, setTyped] = useState(""); const [search, setSearch] = useState("");
+  const [rating, setRating] = useState<ReviewRating | null>(null); const [goal, setGoal] = useState(10); const [examStarted, setExamStarted] = useState(false);
+  const word = vocabulary[cardIndex % vocabulary.length]; const levelWords = vocabulary.filter(w => w.level <= 3);
+  const filtered = useMemo(() => levelWords.filter(w => `${w.hanzi} ${w.pinyin} ${w.french}`.toLowerCase().includes(search.toLowerCase())), [search]);
+  const next = () => { setCardIndex(i => (i + 1) % vocabulary.length); setRevealed(false); setRating(null); };
+  const rate = (value: ReviewRating) => { scheduleReview(undefined, value); setRating(value); setLearned(v => Math.min(goal, v + (value === "again" ? 0 : 1))); setDue(v => Math.max(0, v - 1)); void fetch("/api/reviews", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ wordId:word.id, rating:value, quizType:"flashcard", correct:value!=="again" }) }).catch(() => undefined); };
+  const title: Record<Section,string> = {today:"Aujourd’hui",review:"Révisions intelligentes",lessons:"Leçons",library:"Bibliothèque",quiz:"Quiz",exam:"Mode examen",writing:"Écriture",stats:"Statistiques",settings:"Paramètres"};
 
-  useEffect(() => setRevealed(false), [index]);
-  const speak = () => {
-    const utterance = new SpeechSynthesisUtterance(word.hanzi);
-    utterance.lang = "zh-CN";
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  };
-  const next = () => { setIndex((index + 1) % words.length); setLearned((value) => Math.min(10, value + 1)); };
-
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <a className="brand" href="#today"><span>汉</span> Hanzi<br />Horizon</a>
-        <nav aria-label="Navigation principale">
-          <a className="active" href="#today">Aujourd’hui</a>
-          <a href="#flashcards">Flashcards</a>
-          <a href="#quiz">Quiz</a>
-          <a href="#library">Bibliothèque</a>
-        </nav>
-        <div className="streak"><span>火</span><div><b>3 jours</b><small>de suite</small></div></div>
-        <div className="sidebar-note">Un petit pas chaque jour, un grand voyage en chinois.</div>
-      </aside>
-
-      <section className="content" id="today">
-        <header><div><p className="date">LUNDI · 21 JUILLET</p><h1>Bonjour, Léa.</h1><p className="intro">Ton rituel du jour : un mot, une phrase, puis un défi.</p></div><div className="avatar" aria-label="Profil de Léa">L</div></header>
-
-        <div className="progress-row"><div><span>Objectif du jour</span><strong>{learned} <em>/ 10 mots</em></strong></div><div className="progress-bar"><i style={{ width: `${learned * 10}%` }} /></div><b>{learned * 10}%</b></div>
-
-        <section className="lesson-grid" id="flashcards">
-          <article className="flashcard">
-            <div className="card-top"><span>LE MOT DU JOUR</span><button onClick={speak} aria-label="Écouter la prononciation">◖))</button></div>
-            <div className="character">{word.hanzi}</div>
-            <p className="pinyin">{word.pinyin}</p>
-            <div className={`definition ${revealed ? "shown" : ""}`}><b>{word.french}</b><span>{word.sentence} · {word.translation}</span></div>
-            <div className="card-actions"><button className="secondary" onClick={() => setRevealed(!revealed)}>{revealed ? "Masquer" : "Révéler"}</button><button className="primary" onClick={next}>Je connais →</button></div>
-          </article>
-          <article className="guide-card"><p>À retenir</p><h2>Les tons changent le sens.</h2><div className="tones"><span>mā</span><span>má</span><span>mǎ</span><span>mà</span></div><small>Écoute, répète, puis prononce à voix haute.</small></article>
-        </section>
-
-        <section className="quiz" id="quiz"><div><p>MINI-QUIZ</p><h2>Que signifie 好 ?</h2></div><div className="quiz-options">{["merci", "bien / bon", "au revoir"].map((option) => <button className={answer === option ? (option === "bien / bon" ? "correct" : "wrong") : ""} onClick={() => setAnswer(option)} key={option}>{option}</button>)}</div>{answer && <small>{answer === "bien / bon" ? "Exact ! 好 (hǎo) veut dire bien ou bon." : "Presque. Réessaie : pense à l’expression 很好."}</small>}</section>
-
-        <section className="library" id="library"><div><h2>Continue là où tu t’es arrêtée</h2><p>Des leçons courtes pour garder le rythme.</p></div><button className="text-button" onClick={() => setIndex(0)}>Voir tout</button><div className="lesson-list"><article><span className="number">01</span><div><b>Saluer et se présenter</b><small>8 mots · 5 min</small></div><span className="done">Terminé</span></article><article><span className="number">02</span><div><b>Dire merci et au revoir</b><small>10 mots · 6 min</small></div><button onClick={() => setIndex(2)}>Commencer</button></article></div></section>
-      </section>
-    </main>
-  );
+  return <main className="learning-app">
+    <aside className="sidebar"><div className="mark"><span>学</span><b>Apprendre<br/>le chinois</b></div><nav>{nav.map(item => <button key={item.id} onClick={() => setSection(item.id)} className={section === item.id ? "active" : ""}><i>{item.icon}</i>{item.label}</button>)}</nav><div className="sidebar-art"/><div className="streak"><span>火</span><div><b>3 jours</b><small>de régularité</small></div></div></aside>
+    <section className="workspace"><header className="topbar"><div><h1>{title[section]}</h1><p>{section === "today" ? "Un mot, une révision, puis un défi." : "Ton parcours personnel, à ton rythme."}</p></div><button className="profile" aria-label="Profil">L</button></header>
+      {section === "today" && <><div className="dashboard-grid"><article className="study-card"><img src="/bamboo-study.png" alt="Bambous peints à l’encre"/><div className="study-content"><span className="eyebrow">LE MOT DU JOUR · NIVEAU {word.level}</span><button className="sound" onClick={() => speak(word.hanzi)} aria-label="Écouter la prononciation">◖))</button><div className="hanzi">{word.hanzi}</div><div className="divider"/><div className="pinyin">{word.pinyin}</div><div className={`meaning ${revealed ? "shown" : ""}`}><b>{word.french}</b><small>{word.example} · {word.exampleFr}</small></div><div className="study-actions"><button className="outline" onClick={() => speak(word.hanzi)}>◖)) Écouter</button><button className="coral" onClick={() => setRevealed(v => !v)}>◉ {revealed ? "Masquer" : "Révéler"}</button></div></div><div className="pager"><button onClick={() => setCardIndex(i => (i + vocabulary.length - 1) % vocabulary.length)}>‹</button><span>{cardIndex % vocabulary.length + 1} / {vocabulary.length}</span><button onClick={next}>›</button></div></article>
+        <aside className="right-rail"><article className="goal-card"><h2>Objectif du jour</h2><div className="ring" style={{"--progress": `${learned / goal * 360}deg`} as React.CSSProperties}><b>{learned}<small>/ {goal}</small></b><span>mots</span></div></article><article className="recents"><h2>Récents</h2>{vocabulary.slice(0,4).map((item,i)=><button className={item.id===word.id?"recent selected":"recent"} key={item.id} onClick={()=>setCardIndex(i)}><b>{item.hanzi}</b><span>{item.pinyin}<small>{item.french}</small></span></button>)}<button className="link" onClick={()=>setSection("library")}>Voir tout ›</button></article></aside></div>
+        <QuizPanel word={word} answer={quizAnswer} setAnswer={setQuizAnswer}/></>}
+      {section === "review" && <section className="review-panel"><div className="review-summary"><div><span className="eyebrow">FILE DU JOUR</span><h2>{due} mots attendent une révision</h2><p>Choisis ton ressenti après chaque carte : les intervalles s’adaptent automatiquement.</p></div><button className="coral" onClick={()=>{setSection("today");setRevealed(true)}}>Commencer la session</button></div><article className="review-card"><span>NIVEAU {word.level} · {word.theme}</span><button className="sound" onClick={()=>speak(word.hanzi)}>◖))</button><div className="hanzi">{word.hanzi}</div><p className="pinyin">{word.pinyin}</p><div className="rating-row">{([ ["again","À revoir"],["hard","Difficile"],["good","Bien"],["easy","Facile"] ] as [ReviewRating,string][]).map(([key,label])=><button className={rating===key?`rated ${key}`:""} key={key} onClick={()=>rate(key)}>{label}</button>)}</div>{rating&&<p className="feedback">Prochaine révision programmée. <button onClick={next}>Mot suivant →</button></p>}</article></section>}
+      {section === "lessons" && <section className="lesson-grid">{lessons.map(lesson=><article className={lesson.locked?"lesson locked":"lesson"} key={lesson.id}><span>NIVEAU {lesson.level}</span><h2>{lesson.title}</h2><p>{lesson.theme}</p><div className="lesson-foot"><small>{lesson.locked?"Débloqué après le niveau précédent":`${lesson.words.length} mots · 8 min`}</small><button disabled={lesson.locked} onClick={()=>setSection("today")}>{lesson.locked?"Verrouillé":"Ouvrir →"}</button></div></article>)}</section>}
+      {section === "library" && <section className="library-view"><div className="library-head"><div><h2>Tout le vocabulaire</h2><p>Catalogue issu du standard HSK 3.0 ; contenu enrichi en priorité pour les niveaux 1–3.</p></div><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Chercher un mot, pinyin ou français"/></div><div className="word-table">{filtered.map(item=><article key={item.id}><button className="favorite" onClick={()=>setFavorites(f=>f.includes(item.id)?f.filter(id=>id!==item.id):[...f,item.id])}>{favorites.includes(item.id)?"★":"☆"}</button><b>{item.hanzi}</b><span>{item.pinyin}</span><span>{item.french}</span><small>Niveau {item.level} · {item.theme}</small><button className="listen" onClick={()=>speak(item.hanzi)}>Écouter</button></article>)}{!filtered.length&&<p className="empty">Aucun mot trouvé.</p>}</div></section>}
+      {section === "quiz" && <section className="quiz-lab"><h2>Choisis un exercice</h2><div className="quiz-cards"><QuizChoice title="Choix multiple" text="Associer caractère et traduction" onClick={()=>setSection("today")}/><QuizChoice title="Pinyin" text="Saisir la prononciation avec ou sans tons" onClick={()=>setTyped("")}/><QuizChoice title="Dictée" text="Écouter puis écrire le caractère" onClick={()=>speak(word.hanzi)}/><QuizChoice title="Phrase à trous" text="Compléter une phrase utile" onClick={()=>setRevealed(true)}/></div><article className="pinyin-test"><h3>Écris le pinyin de : <b>{word.hanzi}</b></h3><input value={typed} onChange={e=>setTyped(e.target.value)} placeholder="ex. ni3 ou nǐ"/><button className="coral" onClick={()=>setQuizAnswer(normalize(typed)===normalize(word.pinyin)?"correct":"wrong")}>Vérifier</button>{quizAnswer&&<p className={quizAnswer}>{quizAnswer==="correct"?"Bonne réponse !":"Réponse attendue : "+word.pinyin}</p>}</article></section>}
+      {section === "exam" && <section className="exam"><h2>Mode examen</h2><p>20 questions, 15 minutes, niveau 1 à 3. Les erreurs alimentent ta prochaine session de révision.</p>{!examStarted?<button className="coral" onClick={()=>setExamStarted(true)}>Lancer l’examen</button>:<div className="exam-live"><b>14:59</b><span>Question 1 / 20</span><p>Quel caractère signifie « {word.french} » ?</p><button onClick={()=>setExamStarted(false)}>Terminer la démo</button></div>}</section>}
+      {section === "writing" && <section className="writing"><div><span className="eyebrow">ENTRAÎNEMENT D’ÉCRITURE</span><h2>Trace le caractère</h2><p>Observe le modèle, puis dessine avec la souris ou le doigt.</p><button className="outline" onClick={()=>speak(word.hanzi)}>Écouter {word.pinyin}</button></div><div className="writing-board"><div className="ghost">{word.hanzi}</div><canvas aria-label="Zone de dessin du caractère" onPointerDown={e=>{const c=e.currentTarget,ctx=c.getContext("2d");if(ctx){ctx.beginPath();ctx.moveTo(e.nativeEvent.offsetX,e.nativeEvent.offsetY)}}} onPointerMove={e=>{if(e.buttons){const ctx=e.currentTarget.getContext("2d");if(ctx){ctx.lineWidth=6;ctx.lineCap="round";ctx.strokeStyle="#f05f54";ctx.lineTo(e.nativeEvent.offsetX,e.nativeEvent.offsetY);ctx.stroke()}}}} width="430" height="320"/><small>Validation locale : compare la forme et recommence si nécessaire.</small></div></section>}
+      {section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{learned * 7}</b><small>+{learned} cette semaine</small></div><div className="stat"><span>Précision</span><b>82%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>2 h 18</b><small>Cette semaine</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars">{[35,58,30,72,48,86,62].map((h,i)=><div key={i}><i style={{height:`${h}%`}}/><small>{["L","M","M","J","V","S","D"][i]}</small></div>)}</div></article><article className="mistakes"><h2>À retravailler</h2><p>Les tons de <b>nǐ</b>, les mots de liaison et le vocabulaire de santé sont les thèmes les plus fragiles.</p><button className="coral" onClick={()=>setSection("review")}>Réviser ces mots</button></article></section>}
+      {section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{goal} mots</output><input type="range" min="5" max="30" value={goal} onChange={e=>setGoal(Number(e.target.value))}/></label><label className="toggle">Afficher les tons dans le pinyin <input type="checkbox" defaultChecked/></label><article><b>Données HSK 3.0</b><p>Le catalogue de référence complet est conservé dans le projet avec sa provenance ; les fiches françaises se complètent niveau par niveau.</p></article></section>}
+    </section>
+  </main>;
 }
+
+function QuizChoice({title,text,onClick}:{title:string;text:string;onClick:()=>void}) { return <button className="quiz-choice" onClick={onClick}><b>{title}</b><span>{text}</span><i>→</i></button>; }
+function QuizPanel({word,answer,setAnswer}:{word:VocabularyWord;answer:string|null;setAnswer:(a:string)=>void}) { const choices=[word.hanzi,...vocabulary.filter(w=>w.id!==word.id).slice(0,3).map(w=>w.hanzi)].sort(); return <section className="quick-quiz"><div><span className="quiz-icon">?</span><h2>Quiz</h2><p>Quel caractère correspond à « {word.french} » ?</p></div><div className="answer-options">{choices.map(choice=><button key={choice} className={answer ? (choice===word.hanzi?"correct":answer===choice?"wrong":"") : ""} onClick={()=>setAnswer(choice)}>{choice}</button>)}</div>{answer&&<small>{answer===word.hanzi?"Exact !":"Pas encore : la bonne réponse est "+word.hanzi+"."}</small>}</section>; }

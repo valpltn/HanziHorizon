@@ -1,4 +1,8 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
-export {};
+import { sql } from "drizzle-orm";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
+export const vocabularyWords = sqliteTable("vocabulary_words", { id:text("id").primaryKey(), hanzi:text("hanzi").notNull(), pinyin:text("pinyin").notNull(), french:text("french"), level:integer("level").notNull(), theme:text("theme"), sourceUrl:text("source_url").notNull(), sourceVersion:text("source_version").notNull(), createdAt:text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`) }, t => [uniqueIndex("vocabulary_hanzi_level_idx").on(t.hanzi,t.level)]);
+export const lessons = sqliteTable("lessons", { id:text("id").primaryKey(), level:integer("level").notNull(), title:text("title").notNull(), theme:text("theme").notNull(), locked:integer("locked",{mode:"boolean"}).notNull().default(false) });
+export const userProgress = sqliteTable("user_progress", { userId:text("user_id").notNull(), wordId:text("word_id").notNull(), favorite:integer("favorite",{mode:"boolean"}).notNull().default(false), intervalDays:integer("interval_days").notNull().default(0), repetitions:integer("repetitions").notNull().default(0), dueAt:text("due_at"), lastRating:text("last_rating"), updatedAt:text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`) }, t => [uniqueIndex("user_progress_word_idx").on(t.userId,t.wordId)]);
+export const reviewEvents = sqliteTable("review_events", { id:integer("id").primaryKey({autoIncrement:true}), userId:text("user_id").notNull(), wordId:text("word_id").notNull(), rating:text("rating").notNull(), quizType:text("quiz_type").notNull(), correct:integer("correct",{mode:"boolean"}).notNull(), createdAt:text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`) });
+export const userSettings = sqliteTable("user_settings", { userId:text("user_id").primaryKey(), dailyGoal:integer("daily_goal").notNull().default(10), activeLevel:integer("active_level").notNull().default(1), updatedAt:text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`) });

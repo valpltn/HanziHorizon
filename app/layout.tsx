@@ -13,8 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hanzi Horizon — apprendre le chinois",
-  description: "Des leçons courtes et interactives pour apprendre le chinois chaque jour.",
+  title: "Apprendre le chinois",
+  description: "Réviser le vocabulaire chinois avec des leçons, quiz et statistiques.",
+  openGraph: { title: "Apprendre le chinois", description: "Vocabulaire, quiz et révisions intelligentes.", images: ["/og.png"] },
+  twitter: { card: "summary_large_image", title: "Apprendre le chinois", images: ["/og.png"] },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
