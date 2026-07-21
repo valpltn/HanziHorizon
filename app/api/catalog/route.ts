@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const words = await getDb().select().from(vocabularyWords).orderBy(asc(vocabularyWords.level), asc(vocabularyWords.hanzi)).limit(100);
     return Response.json({ words });
-  } catch (error) {
+  } catch {
     return Response.json({ error: "Le catalogue synchronisé sera disponible après l’initialisation de la base." }, { status: 503 });
   }
 }

@@ -1,5 +1,6 @@
-export type VocabularyWord = { id: string; hanzi: string; pinyin: string; french: string; level: number; theme: string; example?: string; exampleFr?: string; };
-export type Lesson = { id: string; level: number; title: string; theme: string; words: string[]; locked?: boolean };
+import type { Lesson, VocabularyWord } from "../types/learning";
+
+export type { Lesson, VocabularyWord } from "../types/learning";
 
 export const vocabulary: VocabularyWord[] = [
   { id:"l1-ni",hanzi:"你",pinyin:"nǐ",french:"tu",level:1,theme:"Saluer",example:"你好吗？",exampleFr:"Comment vas-tu ?" },
