@@ -75,6 +75,7 @@ export type LearningSettings = {
   dailyGoal: number;
   activeLevel: number;
   showTones: boolean;
+  adminMode: boolean;
   guestImportedAt: string | null;
 };
 

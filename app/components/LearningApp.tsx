@@ -71,6 +71,7 @@ export function LearningApp() {
   const [section, setSection] = useState<Section>("today");
   const [snapshot, setSnapshot] = useState<LearningSnapshot>(() => loadGuestSnapshot());
   const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sync, setSync] = useState<SyncState>("local");
   const [notice, setNotice] = useState("");
@@ -140,7 +141,7 @@ export function LearningApp() {
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) void loadCloud(session.user);
-      else { setSnapshot(loadGuestSnapshot()); setSync("local"); setLoading(false); }
+      else { setIsAdmin(false); setSnapshot(loadGuestSnapshot()); setSync("local"); setLoading(false); }
     });
     const params = new URLSearchParams(location.search);
     if (params.get("recovery") === "1" || params.get("authError")) queueMicrotask(() => {
@@ -163,14 +164,16 @@ export function LearningApp() {
     const supabase = getSupabaseBrowserClient();
     setLoading(true); setSync("syncing"); setNotice("");
     try {
-      const [settings, progress, events, quizzes] = await Promise.all([
+      const [settings, progress, events, quizzes, role] = await Promise.all([
         supabase.from("user_settings").select("*").eq("user_id", activeUser.id).maybeSingle(),
         supabase.from("word_progress").select("*").eq("user_id", activeUser.id),
         supabase.from("review_events").select("*").eq("user_id", activeUser.id).order("created_at"),
         supabase.from("quiz_attempts").select("*").eq("user_id", activeUser.id).order("completed_at"),
+        supabase.from("user_roles").select("role").eq("user_id", activeUser.id).maybeSingle(),
       ]);
-      const firstError = [settings.error, progress.error, events.error, quizzes.error].find(Boolean);
+      const firstError = [settings.error, progress.error, events.error, quizzes.error, role.error].find(Boolean);
       if (firstError) throw firstError;
+      setIsAdmin(role.data?.role === "admin");
       const profile = await supabase.from("profiles").upsert({ user_id: activeUser.id, display_name: activeUser.email?.split("@")[0] ?? "Apprenant", updated_at: new Date().toISOString() });
       if (profile.error) throw profile.error;
       const cloudProgress: Record<string, ReviewState> = {};
@@ -184,9 +187,9 @@ export function LearningApp() {
         if (guest.quizResults.length) await requireOk(supabase.from("quiz_attempts").upsert(guest.quizResults.map((result) => toQuizRow(activeUser.id, result)), { onConflict: "id", ignoreDuplicates: true }));
       }
       const settingsValue = settings.data
-        ? { dailyGoal: settings.data.daily_goal, activeLevel: settings.data.active_level, showTones: settings.data.show_tones, guestImportedAt: settings.data.guest_imported_at }
+        ? { dailyGoal: settings.data.daily_goal, activeLevel: settings.data.active_level, showTones: settings.data.show_tones, adminMode: settings.data.admin_mode ?? false, guestImportedAt: settings.data.guest_imported_at }
         : hasGuest ? guest.settings : { ...emptySettings };
-      await requireOk(supabase.from("user_settings").upsert({ user_id: activeUser.id, daily_goal: settingsValue.dailyGoal, active_level: settingsValue.activeLevel, show_tones: settingsValue.showTones, guest_imported_at: hasGuest ? new Date().toISOString() : settingsValue.guestImportedAt, updated_at: new Date().toISOString() }));
+      await requireOk(supabase.from("user_settings").upsert({ user_id: activeUser.id, daily_goal: settingsValue.dailyGoal, active_level: settingsValue.activeLevel, show_tones: settingsValue.showTones, admin_mode: settingsValue.adminMode, guest_imported_at: hasGuest ? new Date().toISOString() : settingsValue.guestImportedAt, updated_at: new Date().toISOString() }));
       const [freshProgress, freshEvents, freshQuizzes] = await Promise.all([
         supabase.from("word_progress").select("*").eq("user_id", activeUser.id),
         supabase.from("review_events").select("*").eq("user_id", activeUser.id).order("created_at"),
@@ -227,6 +230,7 @@ export function LearningApp() {
   }
   function isLessonComplete(item: Lesson) { return lessonProgressValue(item) >= 80; }
   function isLessonUnlocked(item: Lesson) {
+    if (isAdmin && snapshot.settings.adminMode) return true;
     const unitIndex = lessonUnits.findIndex((unit) => unit[0]?.unitId === item.unitId);
     if (unitIndex > 0) {
       const previousCheckpoint = lessonUnits[unitIndex - 1]?.at(-1);
@@ -354,10 +358,10 @@ export function LearningApp() {
     await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("quiz_attempts").insert(toQuizRow(user.id, result))) : undefined);
   }
 
-  async function saveSettings(key: "dailyGoal" | "activeLevel" | "showTones", value: number | boolean) {
+  async function saveSettings(key: "dailyGoal" | "activeLevel" | "showTones" | "adminMode", value: number | boolean) {
     const settings = { ...snapshot.settings, [key]: value };
     const next = { ...snapshot, settings };
-    await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("user_settings").upsert({ user_id: user.id, daily_goal: settings.dailyGoal, active_level: settings.activeLevel, show_tones: settings.showTones, updated_at: new Date().toISOString() })) : undefined);
+    await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("user_settings").upsert({ user_id: user.id, daily_goal: settings.dailyGoal, active_level: settings.activeLevel, show_tones: settings.showTones, admin_mode: settings.adminMode, updated_at: new Date().toISOString() })) : undefined);
   }
 
   const syncLabel = sync === "syncing" ? "Enregistrement…" : sync === "synced" ? "Synchronisé" : sync === "offline" ? "À resynchroniser" : "Enregistré sur cet appareil";
@@ -370,7 +374,8 @@ export function LearningApp() {
     }
     return [...grouped.values()].map((unitLessons) => unitLessons.sort((a, b) => a.lessonOrder - b.lessonOrder));
   }, [lessonLevel]);
-  const gardenTrees = useMemo(() => buildGardenTreeStates(lessons, snapshot.progress), [snapshot.progress]);
+  const adminMode = isAdmin && snapshot.settings.adminMode;
+  const gardenTrees = useMemo(() => buildGardenTreeStates(lessons, snapshot.progress).map((tree) => adminMode ? { ...tree, unlocked: true } : tree), [adminMode, snapshot.progress]);
   const unlockedGardenLevels = gardenTrees.filter((tree) => tree.unlocked).map((tree) => tree.level);
   const activeGardenLevel = unlockedGardenLevels.includes(snapshot.settings.activeLevel)
     ? snapshot.settings.activeLevel
@@ -438,7 +443,7 @@ export function LearningApp() {
 
       {!loading && section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{stats.masteredWords}</b><small>Maîtrise 3 ou plus</small></div><div className="stat"><span>Précision</span><b>{stats.precision}%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>{formatDuration(stats.studySeconds)}</b><small>Activité enregistrée</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars">{stats.weeklyActivity.map((value, itemIndex) => <div key={itemIndex}><i style={{ height: `${Math.max(4, value * 12)}%` }} /><small>{["L", "M", "M", "J", "V", "S", "D"][itemIndex]}</small><span>{value}</span></div>)}</div></article><article className="mistakes"><h2>À retravailler</h2>{stats.frequentErrors.length ? stats.frequentErrors.map((id) => { const item = vocabulary.find((candidate) => candidate.id === id); return item ? <p key={id}><b>{item.hanzi}</b> · {item.pinyin} · {item.french}</p> : null; }) : <p>Aucune erreur enregistrée pour le moment.</p>}<button className="coral" onClick={() => goTo("review")}>Réviser ces mots</button></article></section>}
 
-      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{snapshot.settings.dailyGoal} mots</output><input type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label>Niveau actif <select value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle"><span>Afficher les tons dans le pinyin</span><input type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label><article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
+      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{snapshot.settings.dailyGoal} mots</output><input type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label>Niveau actif <select value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle"><span>Afficher les tons dans le pinyin</span><input type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label>{isAdmin && <label className="toggle"><span>Mode administrateur <small>Déverrouille tous les niveaux pour les tests.</small></span><input type="checkbox" checked={snapshot.settings.adminMode} onChange={(event) => void saveSettings("adminMode", event.target.checked)} /></label>}<article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
     </section>
 
     {profileOpen && <><button className="panel-backdrop" onClick={() => setProfileOpen(false)} aria-label="Fermer le profil" /><aside className="profile-panel" aria-label="Profil"><button className="icon-button close-button" onClick={() => setProfileOpen(false)} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2>{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { setProfileOpen(false); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}

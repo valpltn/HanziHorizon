@@ -25,7 +25,7 @@ export function AuthDialog({ open, initialMode = "signin", onClose }: { open: bo
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setMessage(null);
     if ((mode === "signup" || mode === "recovery") && password !== confirmPassword) { setMessage({ type: "error", text: "Les deux mots de passe ne correspondent pas." }); return; }
-    if ((mode === "signin" || mode === "signup" || mode === "recovery") && password.length < 8) { setMessage({ type: "error", text: "Le mot de passe doit contenir au moins 8 caractères." }); return; }
+    if ((mode === "signin" || mode === "signup" || mode === "recovery") && password.length < 6) { setMessage({ type: "error", text: "Le mot de passe doit contenir au moins 6 caractères." }); return; }
     setBusy(true);
     const supabase = getSupabaseBrowserClient();
     try {
