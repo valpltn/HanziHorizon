@@ -1,8 +1,9 @@
 import type { Lesson, VocabularyWord } from "../types/learning";
+import importedVocabulary from "./hsk-vocabulary.json";
 
 export type { Lesson, VocabularyWord } from "../types/learning";
 
-export const vocabulary: VocabularyWord[] = [
+const curatedVocabulary: VocabularyWord[] = [
   { id:"l1-ni",hanzi:"你",pinyin:"nǐ",french:"tu",level:1,theme:"Saluer",example:"你好吗？",exampleFr:"Comment vas-tu ?" },
   { id:"l1-wo",hanzi:"我",pinyin:"wǒ",french:"je / moi",level:1,theme:"Se présenter",example:"我是学生。",exampleFr:"Je suis étudiant(e)." },
   { id:"l1-hao",hanzi:"好",pinyin:"hǎo",french:"bien ; bon",level:1,theme:"Saluer",example:"我很好。",exampleFr:"Je vais très bien." },
@@ -23,6 +24,12 @@ export const vocabulary: VocabularyWord[] = [
   { id:"l3-jiankang",hanzi:"健康",pinyin:"jiànkāng",french:"santé",level:3,theme:"Santé",example:"运动对健康很好。",exampleFr:"Le sport est très bon pour la santé." },
 ];
 
+const curatedHanzi = new Set(curatedVocabulary.map((word) => word.hanzi));
+export const vocabulary: VocabularyWord[] = [
+  ...curatedVocabulary,
+  ...(importedVocabulary as VocabularyWord[]).filter((word) => !curatedHanzi.has(word.hanzi)),
+];
+
 export const lessons: Lesson[] = [
   { id:"l1-greetings",level:1,title:"Saluer et se présenter",theme:"Fondations",words:["l1-ni","l1-wo","l1-hao","l1-shi","l1-xiexie"] },
   { id:"l1-daily",level:1,title:"La vie quotidienne",theme:"Fondations",words:["l1-xuexiao","l1-zhongguo","l1-ren","l1-zaijian"] },
@@ -31,4 +38,10 @@ export const lessons: Lesson[] = [
   ...[4,5,6,7,8,9].map(level => ({id:`l${level}-roadmap`,level,title:`Niveau ${level}`,theme:"Programme complet",words:[],locked:true})),
 ];
 
-export const source = { title:"HSK 3.0 vocabulary, ivankra/hsk30", url:"https://github.com/ivankra/hsk30", version:"2021 standard — 11 092 entries", localFile:"data/hsk30-source.csv" };
+export const source = {
+  title: "HSK 3.0 · définitions françaises CFDICT",
+  url: "https://github.com/ivankra/hsk30",
+  dictionaryUrl: "https://chine.in/mandarin/open/CFDICT/",
+  version: "11 092 mots · niveaux 1 à 6 et 7–9",
+  localFile: "data/hsk30-source.csv",
+};

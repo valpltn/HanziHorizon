@@ -10,6 +10,7 @@ export type VocabularyWord = {
   theme: string;
   example: string;
   exampleFr: string;
+  translationAvailable?: boolean;
 };
 
 export type Lesson = {

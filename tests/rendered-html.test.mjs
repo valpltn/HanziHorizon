@@ -44,3 +44,14 @@ test("Supabase is the only remote user data source", async () => {
   await assert.rejects(readFile(new URL("../db/schema.ts", import.meta.url), "utf8"));
   await assert.rejects(readFile(new URL("../app/api/catalog/route.ts", import.meta.url), "utf8"));
 });
+
+test("the complete HSK 3.0 catalog is available with French definitions", async () => {
+  const imported = JSON.parse(await readFile(new URL("../app/data/hsk-vocabulary.json", import.meta.url), "utf8"));
+  assert.equal(imported.length, 11092);
+  assert.equal(new Set(imported.map((word) => word.id)).size, 11092);
+  assert.equal(imported.filter((word) => word.translationAvailable).length, 10721);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(Object.groupBy(imported, (word) => word.level)).map(([level, words]) => [level, words.length])),
+    { "1": 500, "2": 772, "3": 973, "4": 1000, "5": 1071, "6": 1140, "7": 5636 },
+  );
+});
