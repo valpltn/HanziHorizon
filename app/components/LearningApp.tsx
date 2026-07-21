@@ -10,13 +10,15 @@ import {
   BarChart3, BookOpen, BrainCircuit, CalendarDays, Check, ChevronLeft, ChevronRight,
   Clock3, Cloud, CloudOff, Flame, GraduationCap, Heart, Library, LoaderCircle,
   LockKeyhole, LogIn, LogOut, Menu, PenLine, Play, RotateCcw, Search, Settings,
-  Flower2, Leaf, Sparkles, Sprout, Trophy, UserRound, Volume2, X,
+  Leaf, Sparkles, Sprout, UserRound, Volume2, X,
 } from "lucide-react";
 import { lessons, source, vocabulary } from "../data/catalog";
 import {
   answerMatches, calculateStats, clearGuestSnapshot, emptySettings,
   loadGuestSnapshot, mergeGuestProgress, saveGuestSnapshot, scheduleReview,
 } from "../lib/learning-store";
+import { buildGardenTreeStates } from "../lib/garden";
+import type { GardenTreeState } from "../lib/garden";
 import { getSupabaseBrowserClient } from "../lib/supabase-client";
 import type {
   LearningSnapshot, Lesson, QuizResult, QuizType, ReviewEvent, ReviewRating, ReviewState,
@@ -368,7 +370,13 @@ export function LearningApp() {
     }
     return [...grouped.values()].map((unitLessons) => unitLessons.sort((a, b) => a.lessonOrder - b.lessonOrder));
   }, [lessonLevel]);
-  const homeNextLesson = lessons.find((item) => item.level === snapshot.settings.activeLevel && !isLessonComplete(item)) ?? lessons[0];
+  const gardenTrees = useMemo(() => buildGardenTreeStates(lessons, snapshot.progress), [snapshot.progress]);
+  const unlockedGardenLevels = gardenTrees.filter((tree) => tree.unlocked).map((tree) => tree.level);
+  const activeGardenLevel = unlockedGardenLevels.includes(snapshot.settings.activeLevel)
+    ? snapshot.settings.activeLevel
+    : unlockedGardenLevels.at(-1) ?? 1;
+  const activeGardenTree = gardenTrees.find((tree) => tree.level === activeGardenLevel) ?? gardenTrees[0];
+  const homeNextLesson = lessons.find((item) => item.level === activeGardenLevel && !isLessonComplete(item)) ?? lessons.find((item) => item.level === activeGardenLevel) ?? lessons[0];
 
   return <main className="learning-app">
     <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
@@ -390,7 +398,7 @@ export function LearningApp() {
       {notice && <div className="notice" role="status"><span>{notice}</span>{sync === "offline" && user && <button onClick={() => void loadCloud(user)}><RotateCcw /> Réessayer</button>}<button onClick={() => setNotice("")} aria-label="Fermer"><X /></button></div>}
       {loading && <div className="loading" role="status"><LoaderCircle className="spin" /> Chargement de ta progression…</div>}
 
-      {!loading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
+      {!loading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} tree={activeGardenTree} trees={gardenTrees} onSelectLevel={(level) => void saveSettings("activeLevel", level)} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
       {false && !loading && section === "today" && <>
         <div className="dashboard-grid">
           <article className="study-card">
@@ -430,7 +438,7 @@ export function LearningApp() {
 
       {!loading && section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{stats.masteredWords}</b><small>Maîtrise 3 ou plus</small></div><div className="stat"><span>Précision</span><b>{stats.precision}%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>{formatDuration(stats.studySeconds)}</b><small>Activité enregistrée</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars">{stats.weeklyActivity.map((value, itemIndex) => <div key={itemIndex}><i style={{ height: `${Math.max(4, value * 12)}%` }} /><small>{["L", "M", "M", "J", "V", "S", "D"][itemIndex]}</small><span>{value}</span></div>)}</div></article><article className="mistakes"><h2>À retravailler</h2>{stats.frequentErrors.length ? stats.frequentErrors.map((id) => { const item = vocabulary.find((candidate) => candidate.id === id); return item ? <p key={id}><b>{item.hanzi}</b> · {item.pinyin} · {item.french}</p> : null; }) : <p>Aucune erreur enregistrée pour le moment.</p>}<button className="coral" onClick={() => goTo("review")}>Réviser ces mots</button></article></section>}
 
-      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{snapshot.settings.dailyGoal} mots</output><input type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label>Niveau actif <select value={snapshot.settings.activeLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value}>{levelLabel(value)}</option>)}</select></label><label className="toggle"><span>Afficher les tons dans le pinyin</span><input type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label><article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
+      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label>Objectif quotidien <output>{snapshot.settings.dailyGoal} mots</output><input type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label>Niveau actif <select value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle"><span>Afficher les tons dans le pinyin</span><input type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label><article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
     </section>
 
     {profileOpen && <><button className="panel-backdrop" onClick={() => setProfileOpen(false)} aria-label="Fermer le profil" /><aside className="profile-panel" aria-label="Profil"><button className="icon-button close-button" onClick={() => setProfileOpen(false)} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2>{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { setProfileOpen(false); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
@@ -438,24 +446,36 @@ export function LearningApp() {
   </main>;
 }
 
-function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, onContinue }: { totalXp: number; learnedToday: number; dailyGoal: number; streakDays: number; nextLesson: Lesson; onContinue: () => void }) {
-  const milestones = [
-    { xp: 1500, title: "Floraison", icon: Flower2 },
-    { xp: 3000, title: "Nouvelle branche", icon: Sprout },
-    { xp: 6000, title: "Fruit HSK", icon: Trophy },
-  ];
-  const nextMilestone = milestones.find((item) => totalXp < item.xp) ?? { xp: 12000, title: "Arbre ancestral", icon: Trophy };
-  const previousXp = [...milestones].reverse().find((item) => totalXp >= item.xp)?.xp ?? 0;
-  const milestoneProgress = Math.min(100, Math.round(((totalXp - previousXp) / Math.max(1, nextMilestone.xp - previousXp)) * 100));
-  const stage = totalXp >= 6000 ? "Arbre de maîtrise" : totalXp >= 3000 ? "Arbre ramifié" : totalXp >= 1500 ? "Arbre en fleurs" : "Jeune arbre";
-  return <section className={`home-garden stage-${previousXp}`}>
-    <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{stage} · Niveau {nextLesson.level === 7 ? "7–9" : nextLesson.level}</p></header>
+const gardenSlots = [
+  [48, 64, -38], [50, 57, -18], [51, 49, 14], [52, 55, 30],
+  [53, 44, 46], [49, 45, -52], [50, 36, -28], [51, 29, 4],
+  [52, 32, 24], [53, 30, 42], [50, 25, -44], [51, 19, -16],
+  [52, 16, 12], [53, 18, 32], [54, 22, 54], [52, 9, 0],
+] as const;
+
+function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, tree, trees, onSelectLevel, onContinue }: { totalXp: number; learnedToday: number; dailyGoal: number; streakDays: number; nextLesson: Lesson; tree: GardenTreeState; trees: GardenTreeState[]; onSelectLevel: (level: number) => void; onContinue: () => void }) {
+  const treeProgress = Math.round((tree.completedUnits / 16) * 100);
+  const levelName = tree.level === 7 ? "HSK 7–9" : `HSK ${tree.level}`;
+  const branchCount = tree.branches.filter((state) => state !== "locked").length;
+  const nextTree = trees.find((item) => !item.unlocked);
+  return <section className="home-garden">
+    <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{levelName} · {tree.completedUnits} / 16 unités en floraison</p></header>
+    <div className="garden-level-picker" role="tablist" aria-label="Choisir l’arbre HSK">{trees.map((item) => <button role="tab" aria-selected={item.level === tree.level} className={item.level === tree.level ? "active" : ""} disabled={!item.unlocked} onClick={() => onSelectLevel(item.level)} key={item.level}>{item.unlocked ? `HSK ${item.level}` : <><LockKeyhole /> HSK {item.level}</>}</button>)}</div>
     <div className="garden-layout">
-      <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p>Prochain grand jalon :<br /><strong>{nextMilestone.title.toLocaleLowerCase("fr")} à {nextMilestone.xp.toLocaleString("fr-FR")} XP</strong></p><div className="garden-progress" aria-label={`${milestoneProgress}% vers ${nextMilestone.title}`}><i style={{ width: `${milestoneProgress}%` }} /></div><span><Leaf /> Les leçons nourrissent ton prochain jalon.</span></aside>
-      <div className="tree-scene"><img src="/tree/learning-tree.png" alt={`Arbre d’apprentissage, stade ${stage}`} /><div className="tree-word word-one"><b>你</b><small>nǐ</small></div><div className="tree-word word-two"><b>学</b><small>xué</small></div><div className="tree-word word-three"><b>爱</b><small>ài</small></div><div className="growth-event"><Sprout /><span><b>Unité terminée</b><small>Le prochain rameau se prépare.</small></span></div></div>
+      <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" aria-label={`${treeProgress}% du ${levelName} terminé`}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
+      <div className="tree-scene hsk-tree-scene">
+        <img className="tree-locked" src={`/tree/hsk/hsk-${tree.level}-locked.png`} alt={`Arbre ${levelName}, ${tree.completedUnits} unités terminées`} />
+        {tree.branches.map((state, index) => {
+          const [left, top, angle] = gardenSlots[index];
+          if (state === "locked") return null;
+          return <span className={`garden-branch branch-${state}`} style={{ "--left": `${left}%`, "--top": `${top}%`, "--angle": `${angle}deg` } as React.CSSProperties} key={index}>
+            <i className="branch-twig" aria-hidden="true" />{(state === "leaf" || state === "bloom") && <i className="branch-leaves" aria-hidden="true" />}{state === "bloom" && <i className="branch-flowers" aria-hidden="true" />}
+          </span>;
+        })}
+        <div className="growth-event"><Sprout /><span><b>{tree.complete ? `${levelName} accompli` : `Unité ${tree.completedUnits + 1} en cours`}</b><small>{tree.complete ? (nextTree ? `${nextTree.level === 7 ? "HSK 7–9" : `HSK ${nextTree.level}`} est déverrouillé.` : "Tous les arbres sont en floraison.") : "La prochaine leçon réveille un nouveau rameau."}</small></span></div>
+      </div>
       <aside className="next-garden-lesson"><BookOpen /><span>PRÊT À CONTINUER ?</span><h3>{nextLesson.theme}</h3><p>{nextLesson.title}</p><button className="coral" onClick={onContinue}>Continuer ma leçon <ChevronRight /></button><small>{learnedToday} / {dailyGoal} mots aujourd’hui · {streakDays} jour{streakDays > 1 ? "s" : ""} de série</small></aside>
     </div>
-    <footer className="garden-milestones"><div><h3>Tes prochains jalons</h3><p>L’arbre reste stable entre deux grandes étapes.</p></div>{milestones.map(({ xp, title, icon: Icon }) => <article className={totalXp >= xp ? "reached" : ""} key={xp}><Icon /><span><b>{xp.toLocaleString("fr-FR")} XP</b><small>{title}</small></span></article>)}</footer>
   </section>;
 }
 

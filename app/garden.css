@@ -1,6 +1,9 @@
 .home-garden { max-width:1160px;margin:0 auto; }
 .garden-title h2 { margin:6px 0 2px;font:700 42px Georgia,serif; }
 .garden-title p { margin:0;color:var(--green);font:700 18px Georgia,serif; }
+.garden-level-picker { display:flex;gap:8px;margin:22px 0 8px;overflow-x:auto;padding:3px; }
+.garden-level-picker button { min-height:40px;padding:0 14px;border:1px solid var(--line);border-radius:999px;background:#fffdf9;color:var(--muted);font-weight:800;white-space:nowrap;display:flex;align-items:center;gap:6px; }
+.garden-level-picker button svg { width:14px;height:14px; }.garden-level-picker button.active { border-color:var(--green);background:var(--green);color:white; }.garden-level-picker button:disabled { opacity:.48;cursor:not-allowed; }
 .garden-layout { min-height:620px;display:grid;grid-template-columns:220px minmax(480px,1fr) 230px;align-items:start;gap:18px;position:relative; }
 .growth-copy { padding-top:70px; }
 .growth-copy>b { display:block;font:700 52px Georgia,serif; }
@@ -14,8 +17,12 @@
 .tree-scene { height:620px;position:relative;display:grid;place-items:end center;overflow:hidden; }
 .tree-scene:after { content:"";position:absolute;z-index:-1;left:4%;right:4%;bottom:10px;height:170px;border-radius:50%;background:radial-gradient(ellipse,#ced9d188 0%,#eef0e866 48%,transparent 72%);filter:blur(8px); }
 .tree-scene>img { width:150%;max-width:none;height:auto;max-height:600px;object-fit:contain;object-position:center bottom;filter:drop-shadow(0 18px 20px #28453b1f);transition:.5s ease; }
-.stage-0 .tree-scene>img { transform:scale(.94);filter:saturate(.78) drop-shadow(0 18px 20px #28453b1f); }
-.stage-1500 .tree-scene>img { filter:saturate(.92) drop-shadow(0 18px 20px #28453b1f); }
+.hsk-tree-scene { isolation:isolate; }.hsk-tree-scene>img.tree-locked { position:absolute;inset:auto 50% 0;z-index:0;width:150%;max-width:none;max-height:600px;transform:translateX(-50%); }
+.garden-branch { position:absolute;z-index:1;left:var(--left);top:var(--top);width:12%;height:10%;transform:translate(-14%,-50%) rotate(var(--angle));pointer-events:none;transform-origin:left center; }
+.branch-twig { position:absolute;left:0;top:48%;width:100%;height:34%;border-top:3px solid #65705b;border-radius:70% 90% 0 0;opacity:.85;filter:drop-shadow(0 1px 1px #28453b33); }
+.branch-leaves:before,.branch-leaves:after { content:"";position:absolute;width:19px;height:11px;border-radius:90% 0 90% 0;background:linear-gradient(135deg,#adc186,#556f4f);box-shadow:24px -10px 0 #789262,-11px -18px 0 #b4c98e; }
+.branch-leaves:before { left:calc(var(--left) + 1%);top:calc(var(--top) - 4%);transform:rotate(-28deg); }.branch-leaves:after { left:calc(var(--left) + 3%);top:calc(var(--top) + 1%);transform:rotate(35deg); }
+.branch-flowers { position:absolute;left:calc(var(--left) + 2%);top:calc(var(--top) - 6%);width:12px;height:12px;border-radius:50%;background:#ee7e71;box-shadow:12px 6px 0 #f49a8d,-8px 10px 0 #ef8375,4px 17px 0 #f6aa9c; }
 .tree-word { position:absolute;width:58px;height:58px;border:4px solid #f7f3eb;border-radius:50%;display:grid;place-content:center;text-align:center;background:var(--green);color:white;box-shadow:0 6px 18px #1b3d3340; }
 .tree-word b { font:600 23px Georgia,serif; }
 .tree-word small { font-size:10px; }
@@ -33,6 +40,6 @@
 .garden-milestones article>svg { width:38px;height:38px;padding:9px;border-radius:50%;background:#f1ede4;color:#9a8f7d; }
 .garden-milestones article.reached { color:var(--green); }.garden-milestones article.reached>svg { background:#e8f1ec;color:var(--green); }
 .garden-milestones b,.garden-milestones small { display:block; }.garden-milestones small { margin-top:3px;font-size:11px; }
-@media (max-width:1200px) { .garden-layout{grid-template-columns:190px minmax(390px,1fr) 210px}.tree-scene{height:560px}.tree-scene>img{max-height:540px}.growth-copy>b{font-size:43px}.garden-milestones{grid-template-columns:1fr repeat(3,1fr)} }
+@media (max-width:1200px) { .garden-layout{grid-template-columns:190px minmax(390px,1fr) 210px}.tree-scene{height:560px}.tree-scene>img,.hsk-tree-scene>img.tree-locked{max-height:540px}.growth-copy>b{font-size:43px}.garden-milestones{grid-template-columns:1fr repeat(3,1fr)} }
 @media (max-width:900px) { .garden-layout{grid-template-columns:1fr 240px}.growth-copy{grid-column:1/-1;padding-top:25px;display:grid;grid-template-columns:auto 1fr;gap:8px 24px;align-items:center}.growth-copy .garden-progress,.growth-copy>span{grid-column:2}.tree-scene{height:520px}.tree-scene>img{max-height:500px}.next-garden-lesson{margin-top:40px}.garden-milestones{grid-template-columns:1fr 1fr}.garden-milestones>div{grid-column:1/-1} }
-@media (max-width:620px) { .garden-title h2{font-size:31px}.garden-layout{display:flex;flex-direction:column}.growth-copy{width:100%;display:block}.growth-copy>b{font-size:40px}.tree-scene{width:100%;height:430px;order:2}.tree-scene>img{width:155%;max-height:420px}.next-garden-lesson{width:100%;margin-top:0;order:3}.tree-word{width:48px;height:48px}.growth-event{left:0;bottom:35px}.garden-milestones{grid-template-columns:1fr;padding:18px}.garden-milestones>div{grid-column:auto}.garden-milestones article{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.word-three{right:15%} }
+@media (max-width:620px) { .garden-title h2{font-size:31px}.garden-layout{display:flex;flex-direction:column}.growth-copy{width:100%;display:block}.growth-copy>b{font-size:40px}.tree-scene{width:100%;height:430px;order:2}.tree-scene>img,.hsk-tree-scene>img.tree-locked{width:155%;max-height:420px}.next-garden-lesson{width:100%;margin-top:0;order:3}.tree-word{width:48px;height:48px}.growth-event{left:0;bottom:35px}.garden-milestones{grid-template-columns:1fr;padding:18px}.garden-milestones>div{grid-column:auto}.garden-milestones article{border-left:0;border-top:1px solid var(--line);padding:12px 0 0}.word-three{right:15%} }
