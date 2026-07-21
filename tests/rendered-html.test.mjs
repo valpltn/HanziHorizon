@@ -28,3 +28,16 @@ test("all planned product surfaces and explicit button effects are present", asy
   assert.match(plan, /Isolation stricte/); assert.match(plan, /1440×1000/); assert.match(plan, /aucune commande active ne doit être inerte/i);
   assert.match(pkg, /cross-env WRANGLER_LOG_PATH/); assert.match(pkg, /playwright test/);
 });
+
+test("Supabase is the only remote user data source", async () => {
+  const [pkgSource, hostingSource] = await Promise.all([
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.openai/hosting.json", import.meta.url), "utf8"),
+  ]);
+  const hosting = JSON.parse(hostingSource);
+
+  assert.equal(hosting.d1, null);
+  assert.doesNotMatch(pkgSource, /drizzle/i);
+  await assert.rejects(readFile(new URL("../db/schema.ts", import.meta.url), "utf8"));
+  await assert.rejects(readFile(new URL("../app/api/catalog/route.ts", import.meta.url), "utf8"));
+});
