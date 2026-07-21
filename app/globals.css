@@ -136,9 +136,12 @@ svg { width:20px; height:20px; }
   html { min-width:320px;scroll-padding-bottom:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); }
   body { padding-bottom:env(safe-area-inset-bottom); }
   .learning-app { min-height:100dvh;display:block;padding-bottom:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); }
+  .learning-app.today-screen { height:100dvh;min-height:0;padding-bottom:0;overflow:hidden; }
   .sidebar { display:none; }
   .workspace { padding:calc(18px + env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 34px max(18px,env(safe-area-inset-left)); }
+  .today-screen .workspace { height:calc(100dvh - var(--mobile-nav-height) - env(safe-area-inset-bottom));min-height:0;padding:max(8px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) 7px max(12px,env(safe-area-inset-left));display:flex;flex-direction:column;overflow:hidden; }
   .topbar { min-height:54px;margin-bottom:20px; }.topbar h1 { font-size:clamp(27px,7.2vw,33px); }.topbar p { display:none; }
+  .today-topbar { min-height:44px;margin:0 0 6px;justify-content:flex-end;flex:0 0 44px; }.today-topbar>div { display:none; }.today-topbar .profile { margin-left:auto; }
   .mobile-tabbar { position:fixed;z-index:60;left:0;right:0;bottom:0;min-height:calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));padding:7px max(8px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(8px,env(safe-area-inset-left));border-top:1px solid #cfc7bb;background:#fffdf8f5;backdrop-filter:blur(16px);display:grid;grid-template-columns:repeat(5,minmax(0,1fr));box-shadow:0 -10px 30px #18382e14; }
   .mobile-tabbar button { min-width:0;min-height:58px;border:0;border-radius:14px;background:transparent;color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;font-weight:800;line-height:1; }
   .mobile-tabbar button svg { width:22px;height:22px;stroke-width:2; }.mobile-tabbar button.active { color:var(--green-dark);background:#e7f0ec; }.mobile-tabbar button span { overflow:hidden;text-overflow:ellipsis;max-width:100%; }

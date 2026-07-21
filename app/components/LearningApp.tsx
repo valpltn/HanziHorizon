@@ -17,7 +17,7 @@ import {
   answerMatches, calculateStats, clearGuestSnapshot, emptySettings,
   loadGuestSnapshot, mergeGuestProgress, saveGuestSnapshot, scheduleReview,
 } from "../lib/learning-store";
-import { buildGardenTreeStates } from "../lib/garden";
+import { buildGardenTreeStates, findNextGardenLesson } from "../lib/garden";
 import type { GardenTreeState } from "../lib/garden";
 import { getSupabaseBrowserClient } from "../lib/supabase-client";
 import type {
@@ -431,10 +431,10 @@ export function LearningApp() {
     ? snapshot.settings.activeLevel
     : unlockedGardenLevels.at(-1) ?? 1;
   const activeGardenTree = gardenTrees.find((tree) => tree.level === activeGardenLevel) ?? gardenTrees[0];
-  const homeNextLesson = lessons.find((item) => item.level === activeGardenLevel && !isLessonComplete(item)) ?? lessons.find((item) => item.level === activeGardenLevel) ?? lessons[0];
+  const homeNextLesson = findNextGardenLesson(lessons, snapshot.progress, activeGardenLevel);
   const contentLoading = loading || catalogLoading;
 
-  return <main className="learning-app">
+  return <main className={`learning-app ${section === "today" ? "today-screen" : ""}`}>
     <div className="app-ink-atmosphere" aria-hidden="true">
       <img className="app-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
       <img className="app-ink-pine" src="/garden/ink-samples-black/ink-pine-black.png" alt="" />
@@ -448,7 +448,7 @@ export function LearningApp() {
       <div className="lantern-mini"><Sparkles /><div><b>Lanterne {lanternLevel}</b><small>{lanternProgress} / 250 XP</small><i><span style={{ width: `${(lanternProgress / 250) * 100}%` }} /></i></div></div>
     </aside>
     <section className="workspace">
-      <header className="topbar">
+      <header className={`topbar ${section === "today" ? "today-topbar" : ""}`}>
         <div><h1>{titles[section]}</h1><p>{section === "today" ? "Un mot, une révision, puis un défi." : "Ton parcours personnel, à ton rythme."}</p></div>
         <button ref={profileTriggerRef} className="profile" onClick={() => setProfileOpen(true)} aria-label="Ouvrir le profil" aria-expanded={profileOpen} aria-controls="profile-panel">{user?.email?.[0].toUpperCase() ?? <UserRound />}</button>
       </header>
@@ -456,7 +456,7 @@ export function LearningApp() {
       {notice && <div className="notice" role="status"><span>{notice}</span>{sync === "offline" && user && <button onClick={() => void loadCloud(user)}><RotateCcw /> Réessayer</button>}<button onClick={() => setNotice("")} aria-label="Fermer"><X /></button></div>}
       {contentLoading && <div className="loading" role="status"><LoaderCircle className="spin" /> {catalogLoading ? "Préparation du vocabulaire…" : "Chargement de ta progression…"}</div>}
 
-      {!contentLoading && section === "today" && <HomeGarden totalXp={totalXp} learnedToday={learnedToday} dailyGoal={snapshot.settings.dailyGoal} streakDays={stats.streakDays} nextLesson={homeNextLesson} tree={activeGardenTree} trees={gardenTrees} onSelectLevel={(level) => void saveSettings("activeLevel", level)} onContinue={() => { setLessonLevel(homeNextLesson.level); setLessonId(homeNextLesson.id); goTo("lessons"); }} />}
+      {!contentLoading && section === "today" && <HomeGarden totalXp={totalXp} streakDays={stats.streakDays} nextLesson={homeNextLesson} tree={activeGardenTree} trees={gardenTrees} onSelectLevel={(level) => void saveSettings("activeLevel", level)} onContinue={(item) => { setLessonLevel(item.level); setLessonId(item.id); goTo("lessons"); }} />}
       {false && !contentLoading && section === "today" && <>
         <div className="dashboard-grid">
           <article className="study-card">
@@ -527,13 +527,33 @@ const gardenSlots = [
 ] as const;
 const mobilePrimarySections: Section[] = ["today", "review", "lessons", "library"];
 const mobileSecondarySections: Section[] = ["favorites", "quiz", "exam", "writing", "stats", "settings"];
+const compactNumber = new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 });
 
-function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, tree, trees, onSelectLevel, onContinue }: { totalXp: number; learnedToday: number; dailyGoal: number; streakDays: number; nextLesson: Lesson; tree: GardenTreeState; trees: GardenTreeState[]; onSelectLevel: (level: number) => void; onContinue: () => void }) {
+function HomeGarden({ totalXp, streakDays, nextLesson, tree, trees, onSelectLevel, onContinue }: { totalXp: number; streakDays: number; nextLesson: Lesson | null; tree: GardenTreeState; trees: GardenTreeState[]; onSelectLevel: (level: number) => void; onContinue: (lesson: Lesson) => void }) {
+  const [levelPickerOpen, setLevelPickerOpen] = useState(false);
+  const levelTriggerRef = useRef<HTMLButtonElement>(null);
+  const levelCloseRef = useRef<HTMLButtonElement>(null);
   const treeProgress = Math.round((tree.completedUnits / 16) * 100);
   const levelName = tree.level === 7 ? "HSK 7–9" : `HSK ${tree.level}`;
   const branchCount = tree.branches.filter((state) => state !== "locked").length;
   const nextTree = trees.find((item) => !item.unlocked);
-  return <section className="home-garden">
+  const activeBranchIndex = nextLesson ? Math.max(0, Math.min(15, nextLesson.unitOrder - 1)) : null;
+  const lessonStage = nextLesson ? ["découverte", "pratique", "défi"][nextLesson.lessonOrder - 1] ?? "progression" : null;
+
+  const closeLevelPicker = () => {
+    setLevelPickerOpen(false);
+    requestAnimationFrame(() => levelTriggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!levelPickerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => levelCloseRef.current?.focus());
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [levelPickerOpen]);
+
+  return <section className="home-garden" aria-label="Mon jardin de chinois">
     <div className="garden-landscape" aria-hidden="true">
       <img className="garden-ink-hills" src="/garden/ink-samples/ink-hills.png" alt="" />
       <img className="garden-ink-bamboo" src="/garden/ink-samples-black/ink-bamboo-black.png" alt="" />
@@ -543,6 +563,11 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
     </div>
     <header className="garden-title"><span className="eyebrow">TON PARCOURS VIVANT</span><h2>Mon jardin de chinois</h2><p>{levelName} · {tree.completedUnits} / 16 unités en floraison</p></header>
     <div className="garden-level-picker" role="tablist" aria-label="Choisir l’arbre HSK">{trees.map((item) => <button role="tab" aria-selected={item.level === tree.level} className={item.level === tree.level ? "active" : ""} disabled={!item.unlocked} onClick={() => onSelectLevel(item.level)} key={item.level}>{item.unlocked ? `HSK ${item.level}` : <><LockKeyhole /> HSK {item.level}</>}</button>)}</div>
+    <div className="mobile-garden-stats" aria-label="Progression du jour">
+      <button ref={levelTriggerRef} className="mobile-stat mobile-level-stat" type="button" aria-haspopup="dialog" aria-expanded={levelPickerOpen} aria-controls="mobile-hsk-picker" onClick={() => setLevelPickerOpen(true)}><GraduationCap aria-hidden="true" /><span><small>Niveau</small><b>{levelName}</b></span></button>
+      <div className="mobile-stat" aria-label={`${totalXp.toLocaleString("fr-FR")} points d’expérience`}><Sparkles aria-hidden="true" /><span><small>Exp.</small><b>{compactNumber.format(totalXp)} XP</b></span></div>
+      <div className="mobile-stat" aria-label={`Série de ${streakDays} jour${streakDays > 1 ? "s" : ""}`}><Flame aria-hidden="true" /><span><small>Série</small><b>{streakDays} j</b></span></div>
+    </div>
     <div className="garden-layout">
       <aside className="growth-copy"><b>{totalXp.toLocaleString("fr-FR")} <small>XP</small></b><p><strong>{branchCount} rameau{branchCount > 1 ? "x" : ""} réveillé{branchCount > 1 ? "s" : ""}</strong><br />sur les 16 unités de {levelName}</p><div className="garden-progress" role="progressbar" aria-label={`Progression du ${levelName}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={treeProgress}><i style={{ width: `${treeProgress}%` }} /></div><span><Leaf /> Découverte : rameau · Pratique : feuilles · Défi : fleurs.</span></aside>
       <div className="tree-scene hsk-tree-scene">
@@ -555,9 +580,11 @@ function HomeGarden({ totalXp, learnedToday, dailyGoal, streakDays, nextLesson, 
           </span>;
         })}
         <div className="growth-event"><Sprout /><span><b>{tree.complete ? `${levelName} accompli` : `Unité ${tree.completedUnits + 1} en cours`}</b><small>{tree.complete ? (nextTree ? `${nextTree.level === 7 ? "HSK 7–9" : `HSK ${nextTree.level}`} est déverrouillé.` : "Tous les arbres sont en floraison.") : "La prochaine leçon réveille un nouveau rameau."}</small></span></div>
+        {nextLesson && activeBranchIndex !== null ? <button className="mobile-lesson-badge" type="button" style={{ "--badge-left": `${gardenSlots[activeBranchIndex][0]}%`, "--badge-top": `${gardenSlots[activeBranchIndex][1]}%` } as React.CSSProperties} aria-label={`Continuer la leçon ${nextLesson.lessonOrder}, ${lessonStage} du rameau ${nextLesson.unitOrder}`} onClick={() => onContinue(nextLesson)}><Sprout aria-hidden="true" /><span>Leçon {nextLesson.lessonOrder}</span></button> : <div className="mobile-level-complete" role="status"><Check aria-hidden="true" /><span>{nextTree ? `${levelName} terminé` : "Parcours terminé"}</span></div>}
       </div>
-      <aside className="next-garden-lesson"><BookOpen /><span>PRÊT À CONTINUER ?</span><h3>{nextLesson.theme}</h3><p>{nextLesson.title}</p><button className="coral" onClick={onContinue}>Continuer ma leçon <ChevronRight /></button><small>{learnedToday} / {dailyGoal} mots aujourd’hui · {streakDays} jour{streakDays > 1 ? "s" : ""} de série</small></aside>
+      {nextLesson ? <aside className="next-garden-lesson"><BookOpen /><span>PRÊT À CONTINUER ?</span><h3>{nextLesson.theme}</h3><p>{nextLesson.title}</p><button className="coral" onClick={() => onContinue(nextLesson)}>Continuer ma leçon <ChevronRight /></button><small>{streakDays} jour{streakDays > 1 ? "s" : ""} de série</small></aside> : <aside className="next-garden-lesson garden-level-done"><Check /><span>NIVEAU TERMINÉ</span><h3>{levelName} en floraison</h3><p>{nextTree ? `Le niveau HSK ${nextTree.level} est maintenant disponible.` : "Tous les niveaux sont terminés."}</p></aside>}
     </div>
+    {levelPickerOpen && <><button className="garden-level-backdrop" type="button" aria-label="Fermer le sélecteur HSK" onClick={closeLevelPicker} /><div id="mobile-hsk-picker" className="mobile-hsk-picker" role="dialog" aria-modal="true" aria-labelledby="mobile-hsk-title" aria-describedby="mobile-hsk-description" onKeyDown={(event) => { if (event.key === "Escape") closeLevelPicker(); else trapFocus(event); }}><header><div><span>TON PARCOURS</span><h2 id="mobile-hsk-title">Choisir un arbre</h2></div><button ref={levelCloseRef} type="button" aria-label="Fermer" onClick={closeLevelPicker}><X /></button></header><p id="mobile-hsk-description">Termine les 16 rameaux d’un niveau pour déverrouiller le suivant.</p><div className="mobile-hsk-options">{trees.map((item) => <button type="button" className={item.level === tree.level ? "active" : ""} disabled={!item.unlocked} onClick={() => { onSelectLevel(item.level); closeLevelPicker(); }} key={item.level}><span>{item.level === 7 ? "HSK 7–9" : `HSK ${item.level}`}</span><small>{item.level === tree.level ? "Actuel" : item.complete ? <><Check /> Terminé</> : item.unlocked ? `${item.completedUnits} / 16 rameaux` : <><LockKeyhole /> Verrouillé</>}</small></button>)}</div></div></>}
   </section>;
 }
 

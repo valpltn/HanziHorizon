@@ -19,6 +19,13 @@ export function lessonMasteryPercent(lesson: Lesson, progress: Record<string, Re
   return Math.round((mastered / lesson.words.length) * 100);
 }
 
+export function findNextGardenLesson(lessons: Lesson[], progress: Record<string, ReviewState>, level: number) {
+  return lessons
+    .filter((lesson) => lesson.level === level)
+    .toSorted((a, b) => a.unitOrder - b.unitOrder || a.lessonOrder - b.lessonOrder)
+    .find((lesson) => lessonMasteryPercent(lesson, progress) < 80) ?? null;
+}
+
 export function buildGardenTreeStates(lessons: Lesson[], progress: Record<string, ReviewState>): GardenTreeState[] {
   const complete = (lesson: Lesson) => lessonMasteryPercent(lesson, progress) >= 80;
   let priorLevelComplete = true;

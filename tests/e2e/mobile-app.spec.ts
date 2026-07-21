@@ -5,7 +5,7 @@ const mobileProjects = new Set(["iphone-15-pro", "iphone-small", "iphone-landsca
 
 async function ready(page: Page) {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Mon jardin de chinois" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Mon jardin de chinois" })).toBeVisible();
 }
 
 async function openSecondary(page: Page, name: string) {
@@ -19,6 +19,46 @@ test.beforeEach(async ({ page }, testInfo) => {
   await ready(page);
 });
 
+test("mobile garden fits the iPhone 15 Pro viewport and keeps one clear next action", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "iphone-15-pro", "Canonical iPhone viewport");
+  const garden = page.getByRole("region", { name: "Mon jardin de chinois" });
+  await expect(garden.getByLabel("Progression du jour")).toBeVisible();
+  await expect(garden.getByRole("button", { name: /Continuer la leçon 1, découverte du rameau 1/ })).toBeVisible();
+  await expect(page.getByText("PRÊT À CONTINUER ?")).toBeHidden();
+  await expect(page.getByRole("heading", { name: "Mon jardin de chinois" })).toBeHidden();
+
+  const assertFirstViewport = async (height: number) => {
+    const layout = await page.evaluate(() => {
+      const rect = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().toJSON();
+      return { innerHeight, scrollHeight:document.documentElement.scrollHeight, stats:rect(".mobile-garden-stats"), tree:rect(".tree-scene"), badge:rect(".mobile-lesson-badge"), nav:rect(".mobile-tabbar") };
+    });
+    expect(layout.scrollHeight, `${height}px viewport must not scroll`).toBeLessThanOrEqual(layout.innerHeight + 1);
+    expect(layout.stats?.top).toBeGreaterThanOrEqual(0);
+    expect(layout.tree?.bottom).toBeLessThanOrEqual((layout.nav?.top ?? height) + 1);
+    expect(layout.badge?.bottom).toBeLessThanOrEqual(layout.tree?.bottom ?? height);
+    expect(layout.badge?.width).toBeGreaterThanOrEqual(44);
+    expect(layout.badge?.height).toBeGreaterThanOrEqual(44);
+  };
+  await assertFirstViewport(659);
+  await page.screenshot({ path:"test-results/iphone-15-pro-first-viewport.png", fullPage:false });
+  await page.setViewportSize({ width:393, height:852 });
+  await assertFirstViewport(852);
+  await page.setViewportSize({ width:393, height:659 });
+
+  const levelTrigger = garden.getByRole("button", { name:/Niveau HSK 1/ });
+  await levelTrigger.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name:"Choisir un arbre" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name:/HSK 2 Verrouillé/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name:"Fermer" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(levelTrigger).toBeFocused();
+
+  await garden.getByRole("button", { name:/Continuer la leçon 1, découverte du rameau 1/ }).click();
+  await expect(page.getByRole("button", { name:"Commencer la leçon" })).toBeVisible();
+});
+
 test("mobile navigation reaches every product surface without overflow", async ({ page }, testInfo) => {
   if (testInfo.project.name === "iphone-15-pro") await page.screenshot({ path: "test-results/iphone-15-pro-first-viewport.png", fullPage: false });
   const primary = [
@@ -29,7 +69,8 @@ test("mobile navigation reaches every product surface without overflow", async (
   ] as const;
   for (const [button, title] of primary) {
     await page.getByRole("navigation", { name: "Navigation mobile" }).getByRole("button", { name: button }).click();
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    if (button === "Aujourd’hui") await expect(page.getByRole("region", { name:"Mon jardin de chinois" })).toBeVisible();
+    else await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
   }
 
   const secondary = [
@@ -127,6 +168,10 @@ test("key screens have no serious automated accessibility violations", async ({ 
     const serious = results.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
     expect(serious, `${name}: ${serious.map((item) => `${item.id} (${item.nodes.length})`).join(", ")}`).toEqual([]);
   }
+  await page.getByRole("navigation", { name:"Navigation mobile" }).getByRole("button", { name:"Aujourd’hui" }).click();
+  await page.getByRole("button", { name:/Niveau HSK/ }).click();
+  const pickerResults = await new AxeBuilder({ page }).include("#mobile-hsk-picker").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(pickerResults.violations.filter((item) => item.impact === "serious" || item.impact === "critical")).toEqual([]);
 });
 
 test("PWA manifest exposes installable iPhone assets", async ({ page }) => {

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { answerMatches, calculateStats, mergeGuestProgress, normalizePinyin, scheduleReview } from "../app/lib/learning-store.ts";
-import { buildGardenTreeStates } from "../app/lib/garden.ts";
+import { buildGardenTreeStates, findNextGardenLesson } from "../app/lib/garden.ts";
 
 const now = new Date("2026-01-08T00:00:00.000Z");
 const base = { wordId:"l1-1", favorite:false, mastery:1, repetitions:1, intervalDays:3, dueAt:"2026-01-08T00:00:00.000Z", lastRating:"good", lastSeenAt:"2026-01-01T00:00:00.000Z" };
@@ -50,4 +50,29 @@ test("garden branches follow lessons and HSK trees unlock sequentially", () => {
   assert.equal(after[0].branches[0], "bloom");
   assert.equal(after[1].unlocked, true);
   assert.equal(after[2].unlocked, false);
+});
+
+test("mobile garden badge follows discovery, practice, challenge and the next branch", () => {
+  const makeLesson = (unitOrder, lessonOrder, kind) => ({
+    id: `hsk-1-u${unitOrder}-l${lessonOrder}`, level:1, unitId:`hsk-1-u${unitOrder}`,
+    unitTitle:"Test", unitDescription:"Test", unitOrder, lessonOrder, kind,
+    title:"Test", theme:"Test", goal:"Test", durationMinutes:1, xp:1,
+    words:[`u${unitOrder}-l${lessonOrder}`],
+  });
+  const lessons = [
+    makeLesson(1, 1, "discover"), makeLesson(1, 2, "practice"), makeLesson(1, 3, "checkpoint"),
+    makeLesson(2, 1, "discover"), makeLesson(2, 2, "practice"), makeLesson(2, 3, "checkpoint"),
+  ];
+  const progress = {};
+  assert.equal(findNextGardenLesson(lessons, progress, 1).id, "hsk-1-u1-l1");
+  progress["u1-l1"] = { ...base, wordId:"u1-l1", mastery:1 };
+  assert.equal(findNextGardenLesson(lessons, progress, 1).id, "hsk-1-u1-l2");
+  progress["u1-l2"] = { ...base, wordId:"u1-l2", mastery:2 };
+  assert.equal(findNextGardenLesson(lessons, progress, 1).id, "hsk-1-u1-l3");
+  progress["u1-l3"] = { ...base, wordId:"u1-l3", mastery:3 };
+  assert.equal(findNextGardenLesson(lessons, progress, 1).id, "hsk-1-u2-l1");
+  progress["u2-l1"] = { ...base, wordId:"u2-l1", mastery:1 };
+  progress["u2-l2"] = { ...base, wordId:"u2-l2", mastery:2 };
+  progress["u2-l3"] = { ...base, wordId:"u2-l3", mastery:3 };
+  assert.equal(findNextGardenLesson(lessons, progress, 1), null);
 });
