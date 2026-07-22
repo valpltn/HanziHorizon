@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { answerMatches, calculateStats, mergeGuestProgress, normalizePinyin, scheduleReview } from "../app/lib/learning-store.ts";
+import { answerMatches, calculateStats, emptySettings, mergeGuestProgress, normalizePinyin, scheduleReview } from "../app/lib/learning-store.ts";
 import { buildGardenTreeStates, findNextGardenLesson } from "../app/lib/garden.ts";
+import { buildGuidedSequence, normalizeSpeechTranscript, speechMatches } from "../app/lib/guided-lesson.ts";
 
 const now = new Date("2026-01-08T00:00:00.000Z");
 const base = { wordId:"l1-1", favorite:false, mastery:1, repetitions:1, intervalDays:3, dueAt:"2026-01-08T00:00:00.000Z", lastRating:"good", lastSeenAt:"2026-01-01T00:00:00.000Z" };
@@ -33,6 +34,29 @@ test("statistics start at zero and aggregate real events", () => {
   const event = { id:"00000000-0000-4000-8000-000000000001", wordId:"l1-1", rating:"good", correct:true, quizType:"flashcard", durationMs:4000, createdAt:"2026-01-08T00:00:00.000Z" };
   const result = calculateStats({ "l1-1":{ ...base, mastery:3 } }, [event], [], { 1:30 }, now);
   assert.equal(result.masteredWords, 1); assert.equal(result.precision, 100); assert.equal(result.studySeconds, 4); assert.equal(result.weeklyActivity[6], 1);
+});
+
+test("audio lesson settings default to opt-in", () => {
+  assert.equal(emptySettings.listeningExercises, false);
+  assert.equal(emptySettings.speakingExercises, false);
+});
+
+test("guided lesson sequence is stable for all audio setting combinations", () => {
+  const none = buildGuidedSequence({ listening:false, microphone:false, speechRecognition:true });
+  const listening = buildGuidedSequence({ listening:true, microphone:false, speechRecognition:true });
+  const microphone = buildGuidedSequence({ listening:false, microphone:true, speechRecognition:true });
+  const both = buildGuidedSequence({ listening:true, microphone:true, speechRecognition:true });
+  assert.equal(none.length, 10); assert.equal(none[0], "word-zh-fr");
+  assert.equal(listening[0], "dictation"); assert.equal(listening.includes("pronunciation"), false);
+  assert.equal(microphone[0], "pronunciation"); assert.equal(microphone.includes("dictation"), false);
+  assert.deepEqual(both.slice(0, 2), ["dictation", "pronunciation"]);
+  assert.equal(buildGuidedSequence({ listening:false, microphone:true, speechRecognition:false }).includes("pronunciation"), false);
+});
+
+test("Chinese speech comparison ignores spaces and punctuation while keeping characters exact", () => {
+  assert.equal(normalizeSpeechTranscript(" 你，好！ "), "你好");
+  assert.equal(speechMatches("你，好！", "你好|您好"), true);
+  assert.equal(speechMatches("你", "你好|您好"), false);
 });
 
 test("garden branches follow lessons and HSK trees unlock sequentially", () => {

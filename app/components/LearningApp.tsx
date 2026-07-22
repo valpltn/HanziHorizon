@@ -9,8 +9,8 @@ import type { User } from "@supabase/supabase-js";
 import {
   BarChart3, BookOpen, BrainCircuit, CalendarDays, Check, ChevronLeft, ChevronRight,
   Clock3, Cloud, CloudOff, Flame, GraduationCap, Heart, Library, LoaderCircle,
-  LockKeyhole, LogIn, LogOut, MoreHorizontal, PenLine, Play, RotateCcw, Search, Settings,
-  SlidersHorizontal, Leaf, Sparkles, Sprout, UserRound, Volume2, X,
+  LockKeyhole, LogIn, LogOut, Mic, MoreHorizontal, PenLine, Play, RotateCcw, Search, Settings,
+  SlidersHorizontal, Leaf, Sparkles, Sprout, UserRound, Volume2, VolumeX, X,
 } from "lucide-react";
 import { lessons, source, vocabularyPlaceholder } from "../data/lesson-catalog";
 import {
@@ -19,6 +19,8 @@ import {
 } from "../lib/learning-store";
 import { buildGardenTreeStates, findNextGardenLesson } from "../lib/garden";
 import type { GardenTreeState } from "../lib/garden";
+import { buildGuidedSequence, normalizeSpeechTranscript, speechMatches } from "../lib/guided-lesson";
+import type { GuidedKind } from "../lib/guided-lesson";
 import { getSupabaseBrowserClient } from "../lib/supabase-client";
 import type {
   LearningSnapshot, Lesson, QuizResult, QuizType, ReviewEvent, ReviewRating, ReviewState,
@@ -57,8 +59,6 @@ const quizTypes: { id: QuizType; title: string; text: string }[] = [
   { id: "character", title: "Reconnaissance", text: "Identifier un caractère" },
 ];
 const newId = () => crypto.randomUUID();
-const guidedKinds = ["word-zh-fr", "word-fr-zh", "sentence-zh-fr", "sentence-fr-zh", "cloze"] as const;
-type GuidedKind = typeof guidedKinds[number];
 const normalizeGuidedAnswer = (value: string) => value.toLocaleLowerCase("fr").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s.,!?;:'’\-，。！？；：]/g, "");
 const initialProgress = (wordId: string): ReviewState => ({ wordId, favorite: false, mastery: 0, repetitions: 0, intervalDays: 0, dueAt: null, lastRating: null, lastSeenAt: null });
 const choiceValues = (pool: VocabularyWord[], word: VocabularyWord, field: "hanzi" | "french") => [word, ...pool.filter((item) => item.id !== word.id).slice(0, 3)].map((item) => item[field]).sort((a, b) => a.localeCompare(b, "zh"));
@@ -76,6 +76,26 @@ function trapFocus(event: React.KeyboardEvent<HTMLElement>) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
 }
+
+type SpeechRecognitionState = "idle" | "listening" | "result" | "denied" | "unavailable";
+type SpeechRecognitionResultEvent = { results: ArrayLike<{ 0: { transcript: string } }> };
+type SpeechRecognitionErrorEvent = { error: string };
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  abort: () => void;
+};
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+const speechRecognitionConstructor = () => {
+  if (typeof window === "undefined") return null;
+  const speechWindow = window as typeof window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+};
 
 export function LearningApp() {
   const [section, setSection] = useState<Section>("today");
@@ -109,6 +129,10 @@ export function LearningApp() {
   const [guidedInput, setGuidedInput] = useState("");
   const [guidedXp, setGuidedXp] = useState(0);
   const [guidedCombo, setGuidedCombo] = useState(0);
+  const [guidedSequence, setGuidedSequence] = useState<GuidedKind[]>([]);
+  const [speechState, setSpeechState] = useState<SpeechRecognitionState>("idle");
+  const [speechMessage, setSpeechMessage] = useState("");
+  const [lessonExitConfirmOpen, setLessonExitConfirmOpen] = useState(false);
   const [quizType, setQuizType] = useState<QuizType>("multiple-choice");
   const [quizInput, setQuizInput] = useState("");
   const [quizAnswer, setQuizAnswer] = useState<string | null>(null);
@@ -129,6 +153,8 @@ export function LearningApp() {
   const profileTriggerRef = useRef<HTMLButtonElement>(null);
   const profileCloseRef = useRef<HTMLButtonElement>(null);
   const examCancelRef = useRef<HTMLButtonElement>(null);
+  const lessonExitCancelRef = useRef<HTMLButtonElement>(null);
+  const speechRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   const word = vocabulary[wordIndex % Math.max(1, vocabulary.length)] ?? vocabularyPlaceholder;
   const totalByLevel = useMemo(() => Object.fromEntries(Array.from({ length: 9 }, (_, i) => [i + 1, vocabulary.filter((item) => item.level === i + 1).length])), [vocabulary]);
@@ -181,12 +207,13 @@ export function LearningApp() {
   useEffect(() => { if (examStarted && !examDone && examTime === 0) void finishExam(); }, [examTime, examStarted, examDone]);
 
   useEffect(() => {
-    const target = examConfirmOpen ? examCancelRef.current : profileOpen ? profileCloseRef.current : moreOpen ? moreCloseRef.current : null;
+    const target = lessonExitConfirmOpen ? lessonExitCancelRef.current : examConfirmOpen ? examCancelRef.current : profileOpen ? profileCloseRef.current : moreOpen ? moreCloseRef.current : null;
     if (!target) return;
     const previousOverflow = document.body.style.overflow;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (examConfirmOpen) setExamConfirmOpen(false);
+      if (lessonExitConfirmOpen) setLessonExitConfirmOpen(false);
+      else if (examConfirmOpen) setExamConfirmOpen(false);
       else if (profileOpen) closeProfile();
       else if (moreOpen) closeMore();
     };
@@ -194,7 +221,7 @@ export function LearningApp() {
     window.addEventListener("keydown", closeOnEscape);
     queueMicrotask(() => target.focus());
     return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
-  }, [examConfirmOpen, moreOpen, profileOpen]);
+  }, [examConfirmOpen, lessonExitConfirmOpen, moreOpen, profileOpen]);
 
   async function loadCloud(activeUser: User) {
     const supabase = getSupabaseBrowserClient();
@@ -223,9 +250,9 @@ export function LearningApp() {
         if (guest.quizResults.length) await requireOk(supabase.from("quiz_attempts").upsert(guest.quizResults.map((result) => toQuizRow(activeUser.id, result)), { onConflict: "id", ignoreDuplicates: true }));
       }
       const settingsValue = settings.data
-        ? { dailyGoal: settings.data.daily_goal, activeLevel: settings.data.active_level, showTones: settings.data.show_tones, adminMode: settings.data.admin_mode ?? false, guestImportedAt: settings.data.guest_imported_at }
+        ? { dailyGoal: settings.data.daily_goal, activeLevel: settings.data.active_level, showTones: settings.data.show_tones, listeningExercises: settings.data.listening_exercises ?? false, speakingExercises: settings.data.speaking_exercises ?? false, adminMode: settings.data.admin_mode ?? false, guestImportedAt: settings.data.guest_imported_at }
         : hasGuest ? guest.settings : { ...emptySettings };
-      await requireOk(supabase.from("user_settings").upsert({ user_id: activeUser.id, daily_goal: settingsValue.dailyGoal, active_level: settingsValue.activeLevel, show_tones: settingsValue.showTones, admin_mode: settingsValue.adminMode, guest_imported_at: hasGuest ? new Date().toISOString() : settingsValue.guestImportedAt, updated_at: new Date().toISOString() }));
+      await requireOk(supabase.from("user_settings").upsert({ user_id: activeUser.id, daily_goal: settingsValue.dailyGoal, active_level: settingsValue.activeLevel, show_tones: settingsValue.showTones, listening_exercises: settingsValue.listeningExercises, speaking_exercises: settingsValue.speakingExercises, admin_mode: settingsValue.adminMode, guest_imported_at: hasGuest ? new Date().toISOString() : settingsValue.guestImportedAt, updated_at: new Date().toISOString() }));
       const [freshProgress, freshEvents, freshQuizzes] = await Promise.all([
         supabase.from("word_progress").select("*").eq("user_id", activeUser.id),
         supabase.from("review_events").select("*").eq("user_id", activeUser.id).order("created_at"),
@@ -252,7 +279,7 @@ export function LearningApp() {
   }
 
   function speak(text: string) {
-    if (!("speechSynthesis" in window)) { setNotice("La lecture audio n’est pas disponible sur ce navigateur."); return; }
+    if (!("speechSynthesis" in window) || typeof SpeechSynthesisUtterance === "undefined") { setNotice("La lecture audio n’est pas disponible sur ce navigateur."); return; }
     const utterance = new SpeechSynthesisUtterance(text); utterance.lang = "zh-CN";
     window.speechSynthesis.cancel(); window.speechSynthesis.speak(utterance);
   }
@@ -293,6 +320,8 @@ export function LearningApp() {
     return true;
   }
   function startLesson(item: Lesson) {
+    const hasSpeechRecognition = speechRecognitionConstructor() !== null;
+    setGuidedSequence(buildGuidedSequence({ listening: snapshot.settings.listeningExercises, microphone: snapshot.settings.speakingExercises, speechRecognition: hasSpeechRecognition }));
     setLessonPracticeIds(item.words);
     setLessonPracticeIndex(0);
     setReviewActive(true);
@@ -301,22 +330,53 @@ export function LearningApp() {
     setGuidedInput("");
     setGuidedXp(0);
     setGuidedCombo(0);
+    setSpeechState(snapshot.settings.speakingExercises && !hasSpeechRecognition ? "unavailable" : "idle");
+    setSpeechMessage("");
     actionStarted.current = Date.now();
     goTo("review");
   }
   async function answerGuided(value: string, kind: GuidedKind, target: VocabularyWord) {
     if (guidedResult) return;
     const expected = kind === "word-zh-fr" ? target.french
-      : kind === "word-fr-zh" || kind === "cloze" ? target.hanzi
+      : kind === "word-fr-zh" || kind === "cloze" || kind === "dictation" || kind === "pronunciation" ? target.hanzi
       : kind === "sentence-zh-fr" ? target.exampleFr : target.example;
-    const correct = normalizeGuidedAnswer(value) === normalizeGuidedAnswer(expected);
+    const correct = kind === "pronunciation" ? speechMatches(value, expected) : normalizeGuidedAnswer(value) === normalizeGuidedAnswer(expected);
     setGuidedResult({ correct, expected });
     if (correct) {
       const bonus = 5 + Math.min(10, guidedCombo * 2);
       setGuidedXp((xp) => xp + bonus);
       setGuidedCombo((combo) => combo + 1);
     } else setGuidedCombo(0);
-    await rateReview(correct ? "good" : "again", target, kind === "cloze" ? "cloze" : kind.includes("fr-zh") ? "reverse-choice" : "multiple-choice");
+    await rateReview(correct ? "good" : "again", target, kind === "cloze" ? "cloze" : kind === "dictation" ? "dictation" : kind === "pronunciation" ? "pronunciation" : kind.includes("fr-zh") ? "reverse-choice" : "multiple-choice");
+  }
+  function skipGuided() {
+    if (guidedResult) return;
+    speechRecognitionRef.current?.abort();
+    nextGuided();
+  }
+  function startPronunciation(target: VocabularyWord) {
+    const Recognition = speechRecognitionConstructor();
+    if (!Recognition) { setSpeechState("unavailable"); setSpeechMessage("La reconnaissance vocale n’est pas disponible. Tu peux passer cette question."); return; }
+    const recognition = new Recognition();
+    speechRecognitionRef.current = recognition;
+    recognition.lang = "zh-CN";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? "";
+      setSpeechState("result");
+      setSpeechMessage(transcript ? `Entendu : ${transcript}` : "Aucune parole détectée. Réessaie ou passe.");
+      if (transcript) void answerGuided(normalizeSpeechTranscript(transcript), "pronunciation", target);
+    };
+    recognition.onerror = (event) => {
+      const denied = event.error === "not-allowed" || event.error === "service-not-allowed";
+      setSpeechState(denied ? "denied" : "unavailable");
+      setSpeechMessage(denied ? "Accès au microphone refusé. Tu peux passer cette question." : "Aucune parole détectée. Réessaie ou passe.");
+    };
+    recognition.onend = () => setSpeechState((state) => state === "listening" ? "idle" : state);
+    setSpeechState("listening");
+    setSpeechMessage("Je t’écoute…");
+    try { recognition.start(); } catch { setSpeechState("unavailable"); setSpeechMessage("Le microphone ne peut pas démarrer. Tu peux passer cette question."); }
   }
   function nextGuided() {
     if (lessonPracticeIndex >= 9) {
@@ -327,7 +387,7 @@ export function LearningApp() {
       return;
     }
     setLessonPracticeIndex((value) => value + 1);
-    setGuidedResult(null); setGuidedInput(""); setReviewRating(null); actionStarted.current = Date.now();
+    setGuidedResult(null); setGuidedInput(""); setReviewRating(null); setSpeechState("idle"); setSpeechMessage(""); actionStarted.current = Date.now();
   }
   function nextWord() {
     if (lessonPracticeIds) {
@@ -408,10 +468,10 @@ export function LearningApp() {
     await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("quiz_attempts").insert(toQuizRow(user.id, result))) : undefined);
   }
 
-  async function saveSettings(key: "dailyGoal" | "activeLevel" | "showTones" | "adminMode", value: number | boolean) {
+  async function saveSettings(key: "dailyGoal" | "activeLevel" | "showTones" | "listeningExercises" | "speakingExercises" | "adminMode", value: number | boolean) {
     const settings = { ...snapshot.settings, [key]: value };
     const next = { ...snapshot, settings };
-    await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("user_settings").upsert({ user_id: user.id, daily_goal: settings.dailyGoal, active_level: settings.activeLevel, show_tones: settings.showTones, admin_mode: settings.adminMode, updated_at: new Date().toISOString() })) : undefined);
+    await commit(next, user ? async () => requireOk(getSupabaseBrowserClient().from("user_settings").upsert({ user_id: user.id, daily_goal: settings.dailyGoal, active_level: settings.activeLevel, show_tones: settings.showTones, listening_exercises: settings.listeningExercises, speaking_exercises: settings.speakingExercises, admin_mode: settings.adminMode, updated_at: new Date().toISOString() })) : undefined);
   }
 
   const syncLabel = sync === "syncing" ? "Enregistrement…" : sync === "synced" ? "Synchronisé" : sync === "offline" ? "À resynchroniser" : "Enregistré sur cet appareil";
@@ -433,8 +493,10 @@ export function LearningApp() {
   const activeGardenTree = gardenTrees.find((tree) => tree.level === activeGardenLevel) ?? gardenTrees[0];
   const homeNextLesson = findNextGardenLesson(lessons, snapshot.progress, activeGardenLevel);
   const contentLoading = loading || catalogLoading;
+  const lessonSessionActive = section === "review" && reviewActive && lessonPracticeIds !== null;
+  const lessonDetailActive = section === "lessons" && lesson !== undefined;
 
-  return <main className={`learning-app ${section === "today" ? "today-screen" : ""}`}>
+  return <main className={`learning-app ${section === "today" ? "today-screen" : ""} ${lessonSessionActive ? "lesson-session-screen" : ""} ${lessonDetailActive ? "lesson-detail-screen" : ""}`}>
     <div className="app-ink-atmosphere" aria-hidden="true">
       <img className="app-ink-clouds" src="/garden/ink-samples-black/ink-clouds-black.png" alt="" />
       <img className="app-ink-pine" src="/garden/ink-samples-black/ink-pine-black.png" alt="" />
@@ -481,7 +543,7 @@ export function LearningApp() {
 
       {!contentLoading && section === "review" && <section className="review-panel">
         <div className="review-summary"><div><span className="eyebrow">{lessonPracticeIds ? "LEÇON DE TRADUCTION" : "FILE DU JOUR"}</span><h2>{lessonPracticeIds ? `${lessonPracticeIndex + 1} / 10 · ${lesson?.theme ?? "Parcours thématique"}` : `${dueWords.length} mot${dueWords.length > 1 ? "s" : ""} à réviser`}</h2><p>{lessonPracticeIds ? "Comprends, traduis, reconstruis puis produis la phrase." : "Les intervalles s’adaptent à chacune de tes réponses."}</p></div><button className="coral" onClick={() => { setReviewActive(true); setReviewRating(null); actionStarted.current = Date.now(); }}><Play /> {lessonPracticeIds ? "Continuer" : "Commencer la session"}</button></div>
-        {reviewActive ? lessonPracticeIds ? <GuidedLessonExercise pool={vocabulary} word={reviewPool[lessonPracticeIndex % reviewPool.length] ?? reviewWord} kind={guidedKinds[lessonPracticeIndex % guidedKinds.length]} step={lessonPracticeIndex} total={10} input={guidedInput} result={guidedResult} xp={guidedXp} combo={guidedCombo} onInput={setGuidedInput} onSpeak={speak} onAnswer={(value, kind, target) => void answerGuided(value, kind, target)} onNext={nextGuided} /> : <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
+        {reviewActive ? lessonPracticeIds ? <GuidedLessonExercise pool={vocabulary} word={reviewPool[lessonPracticeIndex % reviewPool.length] ?? reviewWord} kind={guidedSequence[lessonPracticeIndex] ?? "word-zh-fr"} step={lessonPracticeIndex} total={guidedSequence.length || 10} input={guidedInput} result={guidedResult} xp={guidedXp} combo={guidedCombo} showTones={snapshot.settings.showTones} speechState={speechState} speechMessage={speechMessage} onInput={setGuidedInput} onSpeak={speak} onStartSpeaking={startPronunciation} onSkip={skipGuided} onClose={() => setLessonExitConfirmOpen(true)} onAnswer={(value, kind, target) => void answerGuided(value, kind, target)} onNext={nextGuided} /> : <article className="review-card"><span>NIVEAU {reviewWord.level} · {reviewWord.theme}</span><button className="sound" onClick={() => speak(reviewWord.hanzi)}><Volume2 /></button><div className="hanzi">{reviewWord.hanzi}</div><p className="pinyin">{reviewWord.pinyin}</p><p>{reviewWord.french}</p><div className="rating-row">{ratings.map(([value, label]) => <button className={reviewRating === value ? `rated ${value}` : ""} key={value} disabled={reviewRating !== null} onClick={() => void rateReview(value)}>{label}</button>)}</div>{reviewRating && <p className="feedback">Prochaine révision programmée. <button onClick={nextWord}>Mot suivant <ChevronRight /></button></p>}</article> : <div className="empty-state"><BrainCircuit /><h3>Ta file est prête</h3><p>Commence quand tu as cinq minutes devant toi.</p></div>}
       </section>}
 
       {!loading && section === "lessons" && <section className="lesson-path">{lesson ? <div className="lesson-detail"><button className="text-button" onClick={() => setLessonId(null)}>← Retour au parcours</button><span className="eyebrow">{levelLabel(lesson.level)} · {lesson.kind === "discover" ? "DÉCOUVERTE" : lesson.kind === "practice" ? "PRATIQUE" : "DÉFI"}</span><h2>{lesson.title}</h2><p>{lesson.goal}</p><div className="lesson-meta"><span><Clock3 /> {lesson.durationMinutes} min</span><span><Sparkles /> {lesson.xp} XP</span><span><Check /> {lessonProgressValue(lesson)} % acquis</span></div><div className="lesson-words">{lessonWords.map((item) => <article key={item.id}><b>{item.hanzi}</b><span>{item.pinyin}</span><p>{item.french}</p><button onClick={() => speak(item.hanzi)} aria-label={`Écouter ${item.hanzi}`}><Volume2 /></button></article>)}</div><button className="coral" onClick={() => startLesson(lesson)}><Play /> {lessonProgressValue(lesson) ? "Reprendre la leçon" : "Commencer la leçon"}</button></div> : <><div className="path-intro"><div><span className="eyebrow">PARCOURS HSK GUIDÉ</span><h2>Avance thème par thème</h2><p>Chaque unité répète le même vocabulaire en trois étapes : découverte, mise en situation et défi.</p></div><div className="level-progress"><b>{Math.round(lessons.filter((item) => item.level === lessonLevel).reduce((sum, item) => sum + lessonProgressValue(item), 0) / Math.max(1, lessons.filter((item) => item.level === lessonLevel).length))}%</b><span>du niveau</span></div></div><div className="level-tabs" role="tablist" aria-label="Choisir un niveau HSK">{levelOptions.map((value) => <button role="tab" aria-selected={lessonLevel === value} className={lessonLevel === value ? "active" : ""} key={value} onClick={() => { setLessonLevel(value); setLessonId(null); }}>{levelLabel(value)}</button>)}</div><div className="unit-list">{lessonUnits.map((unitLessons, unitIndex) => { const unit = unitLessons[0]; const unitLocked = unitIndex > 0 && !isLessonComplete(lessonUnits[unitIndex - 1].at(-1)!); const unitProgress = Math.round(unitLessons.reduce((sum, item) => sum + lessonProgressValue(item), 0) / unitLessons.length); return <article className={`lesson-unit ${unitLocked ? "locked" : ""}`} key={unit.unitId}><header><div><span>UNITÉ {unit.unitOrder}</span><h2>{unit.unitTitle}</h2><p>{unit.unitDescription}</p></div><div className="unit-progress"><b>{unitProgress}%</b><i><span style={{ width: `${unitProgress}%` }} /></i></div></header><div className="lesson-nodes">{unitLessons.map((item) => { const unlocked = isLessonUnlocked(item); const progress = lessonProgressValue(item); const complete = isLessonComplete(item); return <button key={item.id} disabled={!unlocked} className={`lesson-node ${item.kind} ${complete ? "complete" : ""}`} onClick={() => setLessonId(item.id)}><span className="node-icon">{!unlocked ? <LockKeyhole /> : complete ? <Check /> : item.kind === "checkpoint" ? <Sparkles /> : <GraduationCap />}</span><span><small>{item.kind === "discover" ? "1 · Découvrir" : item.kind === "practice" ? "2 · En situation" : "3 · Défi"}</small><b>{item.words.length} mots · {item.durationMinutes} min</b><i><span style={{ width: `${progress}%` }} /></i></span></button>; })}</div></article>; })}</div></>}</section>}
@@ -500,13 +562,14 @@ export function LearningApp() {
 
       {!loading && section === "stats" && <section className="stats"><div className="stat"><span>Mots maîtrisés</span><b>{stats.masteredWords}</b><small>Maîtrise 3 ou plus</small></div><div className="stat"><span>Précision</span><b>{stats.precision}%</b><small>Quiz et révisions</small></div><div className="stat"><span>Temps d’étude</span><b>{formatDuration(stats.studySeconds)}</b><small>Activité enregistrée</small></div><article className="chart"><h2>Activité des 7 derniers jours</h2><div className="bars" aria-hidden="true">{stats.weeklyActivity.map((value, itemIndex) => <div key={itemIndex}><i style={{ height: `${Math.max(4, value * 12)}%` }} /><small>{["L", "M", "M", "J", "V", "S", "D"][itemIndex]}</small><span>{value}</span></div>)}</div><ul className="sr-only">{stats.weeklyActivity.map((value, itemIndex) => <li key={itemIndex}>Jour {itemIndex + 1} : {value} activité{value > 1 ? "s" : ""}</li>)}</ul></article><article className="mistakes"><h2>À retravailler</h2>{stats.frequentErrors.length ? stats.frequentErrors.map((id) => { const item = vocabulary.find((candidate) => candidate.id === id); return item ? <p key={id}><b>{item.hanzi}</b> · {item.pinyin} · {item.french}</p> : null; }) : <p>Aucune erreur enregistrée pour le moment.</p>}<button className="coral" onClick={() => goTo("review")}>Réviser ces mots</button></article></section>}
 
-      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label htmlFor="daily-goal">Objectif quotidien <output id="daily-goal-value">{snapshot.settings.dailyGoal} mots</output><input id="daily-goal" aria-describedby="daily-goal-value" type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label htmlFor="active-level">Niveau actif <select id="active-level" value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle" htmlFor="show-tones"><span>Afficher les tons dans le pinyin</span><input id="show-tones" type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label>{isAdmin && <label className="toggle" htmlFor="admin-mode"><span>Mode administrateur <small>Déverrouille tous les niveaux pour les tests.</small></span><input id="admin-mode" type="checkbox" checked={snapshot.settings.adminMode} onChange={(event) => void saveSettings("adminMode", event.target.checked)} /></label>}<article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
+      {!loading && section === "settings" && <section className="settings"><h2>Ton rythme</h2><label htmlFor="daily-goal">Objectif quotidien <output id="daily-goal-value">{snapshot.settings.dailyGoal} mots</output><input id="daily-goal" aria-describedby="daily-goal-value" type="range" min="5" max="50" step="5" value={snapshot.settings.dailyGoal} onChange={(event) => void saveSettings("dailyGoal", Number(event.target.value))} /></label><label htmlFor="active-level">Niveau actif <select id="active-level" value={activeGardenLevel} onChange={(event) => void saveSettings("activeLevel", Number(event.target.value))}>{levelOptions.map((value) => <option key={value} value={value} disabled={!unlockedGardenLevels.includes(value)}>{levelLabel(value)}{!unlockedGardenLevels.includes(value) ? " · verrouillé" : ""}</option>)}</select></label><label className="toggle" htmlFor="show-tones"><span>Afficher les tons dans le pinyin</span><input id="show-tones" type="checkbox" checked={snapshot.settings.showTones} onChange={(event) => void saveSettings("showTones", event.target.checked)} /></label><label className="toggle" htmlFor="listening-exercises"><span>Questions d’écoute <small>Ajoute une dictée audio aux leçons.</small></span><input id="listening-exercises" type="checkbox" checked={snapshot.settings.listeningExercises} onChange={(event) => void saveSettings("listeningExercises", event.target.checked)} /></label><label className="toggle" htmlFor="speaking-exercises"><span>Questions avec microphone <small>Ajoute un exercice oral si le navigateur le permet.</small></span><input id="speaking-exercises" type="checkbox" checked={snapshot.settings.speakingExercises} onChange={(event) => void saveSettings("speakingExercises", event.target.checked)} /></label>{isAdmin && <label className="toggle" htmlFor="admin-mode"><span>Mode administrateur <small>Déverrouille tous les niveaux pour les tests.</small></span><input id="admin-mode" type="checkbox" checked={snapshot.settings.adminMode} onChange={(event) => void saveSettings("adminMode", event.target.checked)} /></label>}<article><b>Stockage et confidentialité</b><p>{user ? "Tes paramètres et statistiques sont synchronisés avec ton compte." : "En mode découverte, les données restent temporairement sur cet appareil."}</p></article></section>}
     </section>
 
     <MobileNavigation section={section} onNavigate={goTo} moreOpen={moreOpen} onMore={() => setMoreOpen(true)} triggerRef={moreTriggerRef} />
     {moreOpen && <><button className="panel-backdrop mobile-panel-backdrop" onClick={closeMore} aria-label="Fermer le menu Plus" /><section id="mobile-more-panel" className="mobile-more-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title" onKeyDown={trapFocus}><header><div><span>Navigation</span><h2 id="mobile-more-title">Plus</h2></div><button ref={moreCloseRef} className="icon-button" onClick={closeMore} aria-label="Fermer"><X /></button></header><nav aria-label="Navigation secondaire">{nav.filter(([id]) => mobileSecondarySections.includes(id)).map(([id, label, Icon]) => <button key={id} onClick={() => goTo(id)} className={section === id ? "active" : ""}><Icon /><span>{label}</span><ChevronRight /></button>)}</nav></section></>}
     {profileOpen && <><button className="panel-backdrop" onClick={closeProfile} aria-label="Fermer le profil" /><aside id="profile-panel" className="profile-panel" role="dialog" aria-modal="true" aria-labelledby="profile-title" onKeyDown={trapFocus}><button ref={profileCloseRef} className="icon-button close-button" onClick={closeProfile} aria-label="Fermer"><X /></button><div className="profile-avatar"><UserRound /></div><h2 id="profile-title">{user ? "Mon profil" : "Mode découverte"}</h2><p>{user?.email ?? "Connecte-toi pour retrouver ta progression partout."}</p><div className={`sync-state ${sync}`}><span>{sync === "offline" ? <CloudOff /> : <Cloud />}</span><div><b>{syncLabel}</b><small>{user ? "Supabase sécurisé par ton compte" : "Navigateur actuel"}</small></div></div>{user ? <><button className="panel-action" onClick={() => { closeProfile(); goTo("settings"); }}><Settings /> Réglages</button><button className="panel-action" onClick={() => { setProfileOpen(false); setAuthMode("forgot"); setAuthOpen(true); }}><LogIn /> Changer le mot de passe</button><button className="panel-action danger" onClick={() => void getSupabaseBrowserClient().auth.signOut()}><LogOut /> Se déconnecter</button></> : <button className="coral full" onClick={() => { setProfileOpen(false); setAuthMode("signin"); setAuthOpen(true); }}><LogIn /> Se connecter</button>}</aside></>}
     {examConfirmOpen && <div className="modal-backdrop"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="exam-confirm-title" aria-describedby="exam-confirm-copy" onKeyDown={trapFocus}><h2 id="exam-confirm-title">Abandonner l’examen ?</h2><p id="exam-confirm-copy">Ta progression sur ces questions ne sera pas enregistrée.</p><div><button ref={examCancelRef} className="outline" onClick={() => setExamConfirmOpen(false)}>Continuer l’examen</button><button className="danger-button" onClick={() => { setExamConfirmOpen(false); setExamStarted(false); setExamDone(false); setNotice("Examen abandonné : aucun résultat n’a été enregistré."); }}>Abandonner</button></div></section></div>}
+    {lessonExitConfirmOpen && <div className="modal-backdrop"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="lesson-exit-title" aria-describedby="lesson-exit-copy" onKeyDown={(event) => { if (event.key === "Escape") setLessonExitConfirmOpen(false); else trapFocus(event); }}><h2 id="lesson-exit-title">Quitter la leçon ?</h2><p id="lesson-exit-copy">Tes réponses déjà enregistrées sont conservées.</p><div><button ref={lessonExitCancelRef} className="outline" onClick={() => setLessonExitConfirmOpen(false)}>Continuer</button><button className="danger-button" onClick={() => { speechRecognitionRef.current?.abort(); setLessonExitConfirmOpen(false); setLessonPracticeIds(null); setReviewActive(false); setGuidedResult(null); setGuidedInput(""); goTo("lessons"); }}>Quitter</button></div></section></div>}
     <AuthDialog key={`${authMode}-${authOpen}`} open={authOpen} initialMode={authMode} onClose={() => setAuthOpen(false)} />
   </main>;
 }
@@ -588,22 +651,57 @@ function HomeGarden({ totalXp, streakDays, nextLesson, tree, trees, onSelectLeve
   </section>;
 }
 
-function GuidedLessonExercise({ pool, word, kind, step, total, input, result, xp, combo, onInput, onSpeak, onAnswer, onNext }: { pool: VocabularyWord[]; word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; onInput: (value: string) => void; onSpeak: (value: string) => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {
+function GuidedLessonExercise({ pool, word, kind, step, total, input, result, xp, combo, showTones, speechState, speechMessage, onInput, onSpeak, onStartSpeaking, onSkip, onClose, onAnswer, onNext }: { pool: VocabularyWord[]; word: VocabularyWord; kind: GuidedKind; step: number; total: number; input: string; result: { correct: boolean; expected: string } | null; xp: number; combo: number; showTones: boolean; speechState: SpeechRecognitionState; speechMessage: string; onInput: (value: string) => void; onSpeak: (value: string) => void; onStartSpeaking: (target: VocabularyWord) => void; onSkip: () => void; onClose: () => void; onAnswer: (value: string, kind: GuidedKind, target: VocabularyWord) => void; onNext: () => void }) {
   const prompts: Record<GuidedKind, string> = {
+    "word-zh-fr": "Traduis en français",
+    "word-fr-zh": "Traduis en chinois",
+    "sentence-zh-fr": "Traduis la phrase en français",
+    "sentence-fr-zh": "Traduis la phrase en chinois",
+    cloze: "Complète la phrase",
+    dictation: "Écoute puis choisis",
+    pronunciation: "Prononce ce mot",
+  };
+  const desktopPrompts: Record<GuidedKind, string> = {
     "word-zh-fr": `Traduis « ${word.hanzi} » en français`,
     "word-fr-zh": `Traduis « ${word.french} » en chinois`,
     "sentence-zh-fr": `Traduis cette phrase en français : ${word.example}`,
     "sentence-fr-zh": `Traduis cette phrase en chinois : ${word.exampleFr}`,
     cloze: `Complète la phrase : ${word.example.includes(word.hanzi) ? word.example.replace(word.hanzi, "____") : `____ · ${word.pinyin}`}`,
+    dictation: "Écoute puis choisis le caractère",
+    pronunciation: "Prononce le caractère affiché",
   };
-  const expected = kind === "word-zh-fr" ? word.french : kind === "word-fr-zh" || kind === "cloze" ? word.hanzi : kind === "sentence-zh-fr" ? word.exampleFr : word.example;
-  const choices = kind === "word-zh-fr" ? choiceValues(pool, word, "french") : kind === "word-fr-zh" ? choiceValues(pool, word, "hanzi") : [];
-  const freeInput = choices.length === 0;
-  return <article className="guided-lesson-card">
-    <div className="guided-head"><div><span>EXERCICE {step + 1} / {total}</span><i><b style={{ width: `${((step + 1) / total) * 100}%` }} /></i></div><div className={`xp-lantern ${combo >= 3 ? "glowing" : ""}`}><Sparkles /><span><b>{xp} XP</b><small>{combo > 1 ? `Série ×${combo}` : "Lanterne"}</small></span></div></div>
-    <div className="guided-prompt"><small>{kind.includes("sentence") ? "TRADUCTION DE PHRASE" : kind === "cloze" ? "PHRASE À COMPLÉTER" : "TRADUCTION ACTIVE"}</small><h3>{prompts[kind]}</h3>{kind.includes("zh-fr") || kind === "cloze" ? <button className="outline" onClick={() => onSpeak(kind.includes("sentence") ? word.example : word.hanzi)}><Volume2 /> Écouter</button> : null}</div>
-    {freeInput ? <div className="guided-input"><textarea value={input} disabled={result !== null} onChange={(event) => onInput(event.target.value)} placeholder={kind.includes("sentence") ? "Écris toute la phrase…" : "Écris ta réponse…"} /><button className="coral" disabled={!input.trim() || result !== null} onClick={() => onAnswer(input, kind, word)}>Vérifier ma traduction</button></div> : <div className="answer-options">{choices.map((choice) => <button key={choice} disabled={result !== null} className={result ? (normalizeGuidedAnswer(choice) === normalizeGuidedAnswer(expected) ? "correct" : "") : ""} onClick={() => onAnswer(choice, kind, word)}>{choice}</button>)}</div>}
-    {result && <div className={`guided-feedback ${result.correct ? "correct" : "wrong"}`}><div><b>{result.correct ? `Juste ! +${5 + Math.min(10, Math.max(0, combo - 1) * 2)} XP` : "À retravailler"}</b><span>{result.correct ? "Ta série renforce la lumière de ta Lanterne." : `Réponse attendue : ${result.expected}`}</span></div><button onClick={onNext}>{step + 1 === total ? "Terminer" : "Continuer"} <ChevronRight /></button></div>}
+  const choices = kind === "word-zh-fr" ? choiceValues(pool, word, "french") : kind === "word-fr-zh" || kind === "dictation" ? choiceValues(pool, word, "hanzi") : [];
+  const freeInput = choices.length === 0 && kind !== "pronunciation";
+  const pinyin = showTones ? word.pinyin : word.pinyin.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const centerText = kind === "word-fr-zh" || kind === "sentence-fr-zh" ? (kind === "word-fr-zh" ? word.french : word.exampleFr) : kind === "sentence-zh-fr" ? word.example : kind === "cloze" ? (word.example.includes(word.hanzi) ? word.example.replace(word.hanzi, "____") : "____") : kind === "dictation" ? "" : word.hanzi;
+  const showPinyin = (kind === "word-zh-fr" || kind === "cloze") && Boolean(word.pinyin);
+  const pinyinByHanzi = new Map(pool.map((item) => [item.hanzi, showTones ? item.pinyin : item.pinyin.normalize("NFD").replace(/[\u0300-\u036f]/g, "")]));
+
+  return <article className={`guided-lesson-card guided-${kind}`}>
+    <img className="guided-ink guided-ink-bamboo" src="/garden/ink-samples-black/ink-bamboo-black.png" alt="" aria-hidden="true" />
+    <img className="guided-ink guided-ink-pond" src="/garden/ink-samples-black/ink-pond-black.png" alt="" aria-hidden="true" />
+    <header className="guided-head">
+      <button className="guided-close" type="button" onClick={onClose} aria-label="Quitter la leçon"><X /></button>
+      <div className="guided-progress"><span>{step + 1} / {total}</span><i role="progressbar" aria-label="Progression de la leçon" aria-valuemin={0} aria-valuemax={total} aria-valuenow={step + 1}><b style={{ width: `${((step + 1) / total) * 100}%` }} /></i></div>
+      <div className={`xp-lantern ${combo >= 3 ? "glowing" : ""}`} aria-label={`${xp} points d’expérience`}><Sparkles /><span><b>{xp} XP</b><small>{combo > 1 ? `Série ×${combo}` : "Lanterne"}</small></span></div>
+    </header>
+    <div className="guided-prompt guided-desktop-prompt"><small>{kind.includes("sentence") ? "TRADUCTION DE PHRASE" : kind === "cloze" ? "PHRASE À COMPLÉTER" : kind === "dictation" ? "ÉCOUTE" : kind === "pronunciation" ? "PRONONCIATION" : "TRADUCTION ACTIVE"}</small><h3>{desktopPrompts[kind]}</h3>{kind.includes("zh-fr") || kind === "cloze" || kind === "dictation" ? <button className="outline" onClick={() => onSpeak(kind.includes("sentence") ? word.example : word.hanzi)}><Volume2 /> Écouter</button> : null}</div>
+    <div className="guided-question">
+      <h3>{prompts[kind]}</h3>
+      {centerText && <div className={`guided-focus ${kind.includes("sentence") || kind === "cloze" ? "sentence" : ""}`} lang={kind === "word-fr-zh" || kind === "sentence-fr-zh" ? "fr" : "zh-Hans"}>{centerText}</div>}
+      {showPinyin && <div className="guided-pinyin"><span lang="zh-Latn-pinyin">{pinyin}</span><button type="button" onClick={() => onSpeak(word.hanzi)} aria-label={`Écouter la prononciation de ${word.hanzi}`}><Volume2 /></button></div>}
+      {kind === "pronunciation" && result && <div className="guided-pinyin reveal"><span lang="zh-Latn-pinyin">{pinyin}</span><button type="button" onClick={() => onSpeak(word.hanzi)} aria-label={`Écouter la prononciation de ${word.hanzi}`}><Volume2 /></button></div>}
+    </div>
+    <div className="guided-response" aria-live="polite">
+      {result ? <div className={`guided-feedback ${result.correct ? "correct" : "wrong"}`}><div><b>{result.correct ? `Juste ! +${5 + Math.min(10, Math.max(0, combo - 1) * 2)} XP` : "À retravailler"}</b><span>{result.correct ? `${word.hanzi} · ${pinyin} · ${word.french}` : `Réponse attendue : ${result.expected} · ${pinyin}`}</span></div><button onClick={onNext}>{step + 1 === total ? "Terminer" : "Continuer"} <ChevronRight /></button></div>
+      : freeInput ? <div className="guided-input"><textarea value={input} onChange={(event) => onInput(event.target.value)} placeholder={kind.includes("sentence") ? "Écris toute la phrase…" : "Écris ta réponse…"} aria-label="Ta réponse" /><button className="coral" disabled={!input.trim()} onClick={() => onAnswer(input, kind, word)}>Vérifier</button></div>
+      : kind === "pronunciation" ? <p className={`speech-status ${speechState}`} role="status">{speechMessage || "Appuie sur Parler quand tu es prêt."}</p>
+      : <div className="answer-options">{choices.map((choice) => <button key={choice} onClick={() => onAnswer(choice, kind, word)}><span>{choice}</span>{pinyinByHanzi.has(choice) && <small lang="zh-Latn-pinyin">{pinyinByHanzi.get(choice)}</small>}</button>)}</div>}
+    </div>
+    {(kind === "dictation" || kind === "pronunciation") && !result && <footer className="guided-context-bar">
+      <button className="guided-context-primary" type="button" onClick={() => kind === "dictation" ? onSpeak(word.hanzi) : onStartSpeaking(word)} aria-label={kind === "dictation" ? `Écouter la prononciation de ${word.hanzi}` : "Démarrer la reconnaissance vocale"}>{kind === "dictation" ? <Volume2 /> : <Mic />} {kind === "dictation" ? "Écouter" : speechState === "listening" ? "Écoute…" : "Parler"}</button>
+      <button className="guided-skip" type="button" onClick={onSkip}><VolumeX /> Passer</button>
+    </footer>}
   </article>;
 }
 

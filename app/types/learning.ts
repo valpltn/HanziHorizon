@@ -1,5 +1,5 @@
 export type ReviewRating = "again" | "hard" | "good" | "easy";
-export type QuizType = "multiple-choice" | "reverse-choice" | "pinyin" | "matching" | "cloze" | "dictation" | "character";
+export type QuizType = "multiple-choice" | "reverse-choice" | "pinyin" | "matching" | "cloze" | "dictation" | "character" | "pronunciation";
 
 export type VocabularyWord = {
   id: string;
@@ -75,6 +75,8 @@ export type LearningSettings = {
   dailyGoal: number;
   activeLevel: number;
   showTones: boolean;
+  listeningExercises: boolean;
+  speakingExercises: boolean;
   adminMode: boolean;
   guestImportedAt: string | null;
 };

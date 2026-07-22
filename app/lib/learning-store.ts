@@ -1,7 +1,7 @@
 import type { LearningSettings, LearningSnapshot, LearningStats, QuizResult, ReviewEvent, ReviewRating, ReviewState } from "../types/learning";
 
 export const GUEST_STORAGE_KEY = "chinese-learning.snapshot.v1";
-export const emptySettings: LearningSettings = { dailyGoal: 10, activeLevel: 1, showTones: true, adminMode: false, guestImportedAt: null };
+export const emptySettings: LearningSettings = { dailyGoal: 10, activeLevel: 1, showTones: true, listeningExercises: false, speakingExercises: false, adminMode: false, guestImportedAt: null };
 export const emptySnapshot = (): LearningSnapshot => ({ version: 1, settings: { ...emptySettings }, progress: {}, reviewEvents: [], quizResults: [] });
 
 export function loadGuestSnapshot(): LearningSnapshot {
